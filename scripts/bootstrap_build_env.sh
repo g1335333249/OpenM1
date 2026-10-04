@@ -36,8 +36,9 @@ if [[ ! -x "$tool_dir/bin/arm-none-eabi-gcc" ]]; then
   [[ -n "$extracted" ]] || { echo 'GCC archive has no compiler' >&2; exit 1; }
   cp -a "$(dirname "$extracted")/.."/. "$tool_dir"/
 fi
-"$tool_dir/bin/arm-none-eabi-gcc" --version | head -1
-"$tool_dir/bin/arm-none-eabi-gcc" --version | head -1 | grep -q '5.4.1' || { echo 'Exact GCC 5.4.1 required' >&2; exit 1; }
+gcc_version="$("$tool_dir/bin/arm-none-eabi-gcc" --version)"
+printf '%s\n' "${gcc_version%%$'\n'*}"
+[[ "$gcc_version" == *5.4.1* ]] || { echo 'Exact GCC 5.4.1 required' >&2; exit 1; }
 python3 -m lib2to3 -w -n mico-os/makefiles/scripts >/dev/null 2>&1
 python3 - <<'PY'
 from pathlib import Path

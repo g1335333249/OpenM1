@@ -8,3 +8,5 @@ __pycache__/
 /.openocd_cfg
 /.project
 /build-local.log
+
+/build.log

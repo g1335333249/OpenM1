@@ -2,32 +2,33 @@
 import argparse
 import hashlib
 import json
-import struct
 from pathlib import Path
-from ota_common import APP_OFFSET, SDK_COMMIT
+from ota_common import SDK_COMMIT, require_sdk_kernel
 from verify_ota import verify
 
 p = argparse.ArgumentParser()
 p.add_argument('--ota', type=Path, required=True)
-p.add_argument('--reference', type=Path, required=True)
+p.add_argument('--app', type=Path, required=True)
+p.add_argument('--sdk-kernel', type=Path, required=True)
+p.add_argument('--app-header-report', type=Path, required=True)
 p.add_argument('--output', type=Path, required=True)
-p.add_argument('--version', default='0.0.1')
 p.add_argument('--toolchain', required=True)
 a = p.parse_args()
-checks, details = verify(a.ota, a.reference)
-verified_toolchain = '5.4.1' in a.toolchain
-safe = bool(checks) and all(checks.values()) and verified_toolchain
-data = {
-    'name': 'OpenM1', 'version': a.version, 'board': 'MK3080B',
-    'platform': 'EMW3080BE', 'soc': 'MX1290', 'app_offset': hex(APP_OFFSET),
-    'size': details.get('size'), 'app_payload_size': details.get('payload_size'),
-    'crc16': details.get('crc16'), 'md5': details.get('md5'),
-    'sha256': details.get('sha256'), 'kernel_sha256': details.get('kernel_sha256'),
-    'toolchain': a.toolchain, 'toolchain_verified': verified_toolchain,
-    'sdk_commit': SDK_COMMIT, 'reference_kernel_match': checks.get('kernel match', False),
-    'safe_to_flash': safe, 'checks': checks,
-}
-a.output.parent.mkdir(parents=True, exist_ok=True)
-a.output.write_text(json.dumps(data, indent=2) + '\n')
-print(a.output)
-raise SystemExit(0 if safe else 1)
+checks, details = verify(a.ota, a.sdk_kernel, a.app)
+header = a.app_header_report.read_text()
+header_valid = all(line.startswith('PASS ') for line in header.splitlines() if line.startswith(('PASS ', 'FAIL ')))
+symbols_valid = all(f'PASS {symbol}' in header for symbol in ('user_handler','moc_app_main','moc_adapter','main'))
+sdk_valid = Path('mico-os').is_dir() and __import__('subprocess').check_output(['git','-C','mico-os','rev-parse','HEAD'], text=True).strip() == SDK_COMMIT
+kernel = require_sdk_kernel(a.sdk_kernel)
+valid = all(checks.values()) and header_valid and symbols_valid and sdk_valid and '5.4.1' in a.toolchain
+data = {'name':'OpenM1-BootProbe','version':'0.0.2','board':'MK3080B','sdk_commit':SDK_COMMIT,
+        'sdk_kernel_version':'3080B002.023','kernel_source':'mico-os/resources/moc_kernel/3080B/kernel.bin',
+        'kernel_sha256':hashlib.sha256(kernel).hexdigest(),'interface_version':3,
+        'moc_app_header_valid':header_valid,'startup_symbols_valid':symbols_valid,
+        'ota_format_valid':all(checks.values()),'kernel_app_same_sdk':sdk_valid,
+        'safe_to_flash':valid,'hardware_verified':False,'toolchain':a.toolchain,
+        'app_size':details['app_size'],'app_payload_size':details['payload_size'],
+        'ota_size':details['size'],'app_crc16':details['crc16'],
+        'ota_md5':details['md5'],'ota_sha256':details['sha256']}
+a.output.write_text(json.dumps(data, indent=2)+'\n')
+raise SystemExit(0 if valid else 1)
