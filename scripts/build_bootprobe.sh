@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-BootProbe-v0.0.2
+PREFIX=OpenM1-BootProbe-v0.0.3
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 TOOL=.micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/Linux64/bin
 [[ "$(git -C mico-os rev-parse HEAD)" == "$SDK_COMMIT" ]]
@@ -42,5 +42,9 @@ Path('dist/recovery/checksums.txt').write_text(f'size: {len(b)}\nMD5: {hashlib.m
 PY
 (cd dist && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
 echo 'KERNEL_APP_SAME_SDK=YES'
-echo 'HARDWARE_VERIFIED=NO'
+echo 'MOC_BOOT_VERIFIED=YES'
+echo 'MOC_APP_ENTRY_VERIFIED=YES'
+echo 'MOC_RUNTIME_STABLE=YES'
+echo 'WIFI_VERIFIED=NO'
+echo 'SOFTAP_VERIFIED=NO'
 echo 'SAFE_TO_FLASH_FOR_HARDWARE_TEST=YES'
