@@ -1,0 +1,76 @@
+name: Build OpenM1 Firmware
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout OpenM1
+        uses: actions/checkout@v4
+      - name: Setup SDK
+        uses: actions/checkout@v4
+        with:
+          repository: MXCHIP/mico-os
+          ref: 9b09de78164940ff3876d2053f8e7dd42ca2b8ba
+          path: mico-os
+      - name: Setup build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make perl curl python3 python-is-python3 dash libncurses5
+      - name: Setup GCC
+        run: |
+          bash scripts/bootstrap_build_env.sh
+          .micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/Linux64/bin/arm-none-eabi-gcc --version
+      - name: Verify reference OTA
+        run: python3 tools/verify_ota.py 'reference/zM1@MK3080B@moc.ota.bin' --reference 'reference/zM1@MK3080B@moc.ota.bin'
+      - name: Check release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "$GITHUB_REF_NAME" = v0.0.1
+      - name: Build OpenM1
+        run: |
+          set -o pipefail
+          make -f mico-os/makefiles/Makefile openm1@MK3080B@moc HOST_OS=Linux64 TOOLS_ROOT=./.micoder SOURCE_ROOT=./ VERBOSE=1 2>&1 | tee build.log
+      - name: Generate OTA
+        run: |
+          python3 tools/extract_reference_kernel.py --reference 'reference/zM1@MK3080B@moc.ota.bin' --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin --output build/reference_kernel.bin --report build/kernel_compare.txt
+          mkdir -p dist
+          find build -type f \( -name '*.elf' -o -name '*.bin' \) -print
+          APP_BIN="$(find build -type f -name 'openm1@MK3080B@moc.bin' -print -quit)"
+          test -n "$APP_BIN"
+          cp "$APP_BIN" dist/OpenM1-v0.0.1.bin
+          cp "${APP_BIN%.bin}.elf" dist/OpenM1-v0.0.1.elf
+          cp "${APP_BIN%.bin}.usr.bin" dist/OpenM1-v0.0.1.sdk.usr.bin
+          cp "${APP_BIN%.bin}.ota.bin" dist/OpenM1-v0.0.1.sdk.ota.bin
+          python3 tools/make_ota.py --app "$APP_BIN" --reference 'reference/zM1@MK3080B@moc.ota.bin' --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin --output 'dist/OpenM1-v0.0.1@MK3080B@moc.ota.bin' --usr-output dist/OpenM1-v0.0.1.usr.bin --kernel-report build/kernel_compare.txt
+          cp build/kernel_compare.txt dist/kernel_compare.txt
+          cp build.log dist/build.log
+      - name: Verify OTA
+        run: |
+          python3 tools/verify_ota.py 'dist/OpenM1-v0.0.1@MK3080B@moc.ota.bin' --reference 'reference/zM1@MK3080B@moc.ota.bin'
+          python3 tools/generate_manifest.py --ota 'dist/OpenM1-v0.0.1@MK3080B@moc.ota.bin' --reference 'reference/zM1@MK3080B@moc.ota.bin' --output dist/manifest.json --version 0.0.1 --toolchain "$(.micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/Linux64/bin/arm-none-eabi-gcc --version | head -1)"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          m = json.loads(Path('dist/manifest.json').read_text())
+          tag = os.getenv('GITHUB_REF_NAME', 'v0.0.1')
+          name = 'OpenM1-v0.0.1@MK3080B@moc.ota.bin'
+          url = f'https://github.com/{os.environ["GITHUB_REPOSITORY"]}/releases/download/{tag}/{name}'
+          Path('dist/latest.json').write_text(json.dumps({'name':'OpenM1','version':m['version'],'url':url,'sha256':m['sha256'],'size':m['size']}, indent=2)+'\n')
+          PY
+          cd dist && sha256sum OpenM1-v0.0.1* manifest.json kernel_compare.txt build.log > SHA256SUMS.txt
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenM1-firmware-${{ github.sha }}
+          path: dist/
+      - name: Publish tag release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" 'dist/OpenM1-v0.0.1@MK3080B@moc.ota.bin' dist/manifest.json dist/SHA256SUMS.txt dist/latest.json --title "OpenM1 ${GITHUB_REF_NAME}" --notes 'Experimental firmware. Verify hardware recovery before flashing.'

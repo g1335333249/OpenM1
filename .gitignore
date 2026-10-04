@@ -1,0 +1,9 @@
+/mico-os/
+/.micoder/
+/build/
+/dist/
+__pycache__/
+*.pyc
+/.gdbinit
+/.openocd_cfg
+/build-local.log
