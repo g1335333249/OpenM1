@@ -21,8 +21,8 @@ symbols_valid = all(f'PASS {symbol}' in header for symbol in ('user_handler','mo
 sdk_valid = Path('mico-os').is_dir() and __import__('subprocess').check_output(['git','-C','mico-os','rev-parse','HEAD'], text=True).strip() == SDK_COMMIT
 kernel = require_sdk_kernel(a.sdk_kernel)
 valid = all(checks.values()) and header_valid and symbols_valid and sdk_valid and '5.4.1' in a.toolchain
-data = {'name':'OpenM1-BootProbe','version':'0.0.3','board':'MK3080B','sdk_commit':SDK_COMMIT,
-        'kernel_version':'3080B002.023','sdk_kernel_version':'3080B002.023',
+data = {'name':'OpenM1','firmware':'OpenM1 Recovery','version':'0.1.0','board':'MK3080B','sdk_commit':SDK_COMMIT,
+        'kernel':'3080B002.023','kernel_version':'3080B002.023','sdk_kernel_version':'3080B002.023',
         'kernel_source':'mico-os/resources/moc_kernel/3080B/kernel.bin',
         'kernel_sha256':hashlib.sha256(kernel).hexdigest(),'interface_version':3,
         'moc_app_header_valid':header_valid,'startup_symbols_valid':symbols_valid,
@@ -32,8 +32,12 @@ data = {'name':'OpenM1-BootProbe','version':'0.0.3','board':'MK3080B','sdk_commi
         'main_verified_on_hardware':True,
         'runtime_verified_on_hardware':True,
         'wifi_init_fix':'MicoInit before micoWlanPowerOn',
-        'wifi_verified_on_hardware':False,
-        'softap_verified_on_hardware':False,
+        'wifi_verified_on_hardware':True,
+        'softap_verified_on_hardware':True,
+        'http_verified_on_hardware':False,
+        'ota_upload_verified_on_hardware':False,
+        'ota_url_verified_on_hardware':False,
+        'recovery_ip':'192.168.4.1','recovery_ssid':'OpenM1-Recovery',
         'hardware_verified':False,'toolchain':a.toolchain,
         'app_size':details['app_size'],'app_payload_size':details['payload_size'],
         'ota_size':details['size'],'app_crc16':details['crc16'],

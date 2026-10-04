@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-BootProbe-v0.0.3
+PREFIX=OpenM1-Recovery-v0.1.0
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 TOOL=.micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/Linux64/bin
 [[ "$(git -C mico-os rev-parse HEAD)" == "$SDK_COMMIT" ]]
@@ -26,6 +26,10 @@ cp "$APP_MAP" "dist/$PREFIX.map"
 cp build.log dist/build.log
 echo '[PASS] MK3080B@moc build'
 python3 tools/verify_app.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --objdump "$TOOL/arm-none-eabi-objdump" --symbols dist/symbols.txt --report dist/app-header-report.txt
+for symbol in recovery_http_server_thread recovery_ota_upload_handler recovery_ota_url_handler recovery_ota_verify_flash mico_ota_switch_to_new_fw; do
+  if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
+  echo "[PASS] $symbol"
+done
 python3 tools/kernel_report.py --sdk-kernel "$KERNEL" --output dist/kernel-report.txt
 python3 tools/make_ota.py --app "dist/$PREFIX.bin" --sdk-kernel "$KERNEL" --output "$OTA"
 cmp "$OTA" "${APP_BIN%.bin}.ota.bin"
@@ -45,6 +49,6 @@ echo 'KERNEL_APP_SAME_SDK=YES'
 echo 'MOC_BOOT_VERIFIED=YES'
 echo 'MOC_APP_ENTRY_VERIFIED=YES'
 echo 'MOC_RUNTIME_STABLE=YES'
-echo 'WIFI_VERIFIED=NO'
-echo 'SOFTAP_VERIFIED=NO'
+echo 'WIFI_VERIFIED=YES'
+echo 'SOFTAP_VERIFIED=YES'
 echo 'SAFE_TO_FLASH_FOR_HARDWARE_TEST=YES'

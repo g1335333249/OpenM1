@@ -1,54 +1,69 @@
 #include "mico.h"
 #include "mico_wlan.h"
+#include "recovery.h"
 
 int main(void)
 {
     network_InitTypeDef_st wifi_config;
+    mico_Context_t *context;
     char rf_version[64] = {0};
     OSStatus result;
     unsigned long counter = 0;
+    micoMemInfo_t *memory;
 
     printf("================================\r\n"
-           "OpenM1 BootProbe\r\n"
-           "Version: 0.0.3\r\n"
+           "OpenM1 Recovery\r\n"
+           "Version: 0.1.0\r\n"
            "Board: MK3080B\r\n"
-           "Kernel target: 3080B002.023\r\n"
+           "Kernel: 3080B002.023\r\n"
            "================================\r\n");
-    printf("BOOT: main entered\r\n");
-    printf("BOOT: calling MicoInit\r\n");
-    result = MicoInit();
-    printf("BOOT: MicoInit result = %d\r\n", result);
-    mico_thread_msleep(500);
+    printf("RECOVERY: main entered\r\n");
+    printf("RECOVERY: system context init\r\n");
+    context = mico_system_context_init(0);
+    if (context == NULL) {
+        printf("RECOVERY: system context failed\r\n");
+        return -1;
+    }
+    printf("RECOVERY: system context initialized\r\n");
 
-    printf("BOOT: reading RF version\r\n");
+    /* Preserve the v0.0.3 hardware verified Wi-Fi sequence and delays. */
+    printf("RECOVERY: MicoInit\r\n");
+    result = MicoInit();
+    printf("RECOVERY: MicoInit result = %d\r\n", result);
+    mico_thread_msleep(500);
     MicoGetRfVer(rf_version, sizeof(rf_version));
     rf_version[sizeof(rf_version) - 1] = '\0';
-    printf("BOOT: RF version = %s\r\n", rf_version[0] ? rf_version : "(unavailable)");
-
-    printf("BOOT: calling micoWlanPowerOn\r\n");
+    recovery_set_rf(rf_version);
+    printf("RECOVERY: RF = %s\r\n", recovery_rf());
+    printf("RECOVERY: calling micoWlanPowerOn\r\n");
     result = micoWlanPowerOn();
-    printf("BOOT: micoWlanPowerOn result = %d\r\n", result);
+    printf("RECOVERY: micoWlanPowerOn result = %d\r\n", result);
     mico_thread_msleep(500);
 
-    printf("BOOT: preparing SoftAP\r\n");
+    printf("RECOVERY: starting SoftAP\r\n");
     memset(&wifi_config, 0, sizeof(wifi_config));
     wifi_config.wifi_mode = Soft_AP;
-    memcpy(wifi_config.wifi_ssid, "OpenM1-Recovery", sizeof("OpenM1-Recovery"));
-    memcpy(wifi_config.local_ip_addr, "192.168.4.1", sizeof("192.168.4.1"));
+    memcpy(wifi_config.wifi_ssid, RECOVERY_SSID, sizeof(RECOVERY_SSID));
+    memcpy(wifi_config.local_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     memcpy(wifi_config.net_mask, "255.255.255.0", sizeof("255.255.255.0"));
-    memcpy(wifi_config.gateway_ip_addr, "192.168.4.1", sizeof("192.168.4.1"));
-    memcpy(wifi_config.dnsServer_ip_addr, "192.168.4.1", sizeof("192.168.4.1"));
+    memcpy(wifi_config.gateway_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
+    memcpy(wifi_config.dnsServer_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     wifi_config.dhcpMode = DHCP_Server;
-    printf("BOOT: SoftAP SSID = OpenM1-Recovery\r\n");
-    printf("BOOT: SoftAP IP = 192.168.4.1\r\n");
-    printf("BOOT: SoftAP DHCP = Server\r\n");
-    printf("BOOT: calling StartNetwork\r\n");
+    printf("RECOVERY: calling StartNetwork\r\n");
     result = StartNetwork(&wifi_config);
-    printf("BOOT: StartNetwork result = %d\r\n", result);
-    printf("BOOT: SoftAP requested\r\n");
-
+    printf("RECOVERY: StartNetwork result = %d\r\n", result);
+    if (result == kNoErr) {
+        printf("RECOVERY: SoftAP ready\r\n");
+        printf("RECOVERY: WiFi ready\r\n");
+        printf("RECOVERY: IP = %s\r\n", RECOVERY_IP);
+        recovery_ota_partition_log();
+        if (recovery_http_start() != kNoErr)
+            printf("RECOVERY: HTTP server failed to start\r\n");
+    }
     for (;;) {
-        mico_thread_msleep(2000);
-        printf("OPENM1 ALIVE %lu\r\n", ++counter);
+        mico_thread_msleep(10000);
+        memory = MicoGetMemoryInfo();
+        printf("RECOVERY: alive %lu, free heap = %d\r\n", ++counter,
+               memory ? memory->free_memory : -1);
     }
 }
