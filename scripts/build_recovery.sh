@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.3.0
+PREFIX=OpenM1-v0.3.1
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 TOOL=.micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/Linux64/bin
 [[ "$(git -C mico-os rev-parse HEAD)" == "$SDK_COMMIT" ]]
@@ -40,21 +40,22 @@ for symbol in recovery_http_server_thread recovery_ota_upload_handler recovery_o
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
-for symbol in m1_uart_init m1_uart_worker m1_sensor_parse m1_sensor_get_snapshot; do
+for symbol in m1_uart_init m1_uart_worker m1_uart_send_init_command zm1_uart_init_command mico_uart_send m1_sensor_parse m1_sensor_get_snapshot; do
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
-for route in /api/wifi/status /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/sensors /api/uart/status /api/uart/raw /api/uart/config; do
+for route in /api/wifi/status /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/sensors /api/uart/status /api/uart/raw /api/uart/config /api/uart/init; do
   if ! "$TOOL/arm-none-eabi-strings" "dist/$PREFIX.elf" | grep -F "$route" >/dev/null; then echo "[FAIL] missing route $route"; exit 1; fi
   echo "[PASS] $route"
 done
 grep -Eq '^#define MICO_STDIO_UART[[:space:]]+MICO_UART_2' mico-os/board/MK3080B/mico_board.h
 grep -Eq '^#define MICO_UART_FOR_APP[[:space:]]+MICO_UART_1' mico-os/board/MK3080B/mico_board.h
 echo '[PASS] STDIO UART2 and app UART1 unchanged'
-if grep -En 'MicoUartSend|mico_uart_send|MICO_STDIO_UART' openm1/m1_uart.c openm1/m1_sensor.c; then
-  echo '[FAIL] sensor bridge must be receive-only and leave STDIO UART alone'; exit 1
+python3 tools/check_uart_init_command.py
+if grep -En 'MICO_STDIO_UART|/api/uart/send' openm1/m1_uart.c openm1/m1_sensor.c openm1/recovery_http.c; then
+  echo '[FAIL] sensor bridge must leave STDIO UART alone and forbid arbitrary TX'; exit 1
 fi
-echo '[PASS] sensor bridge passive RX only'
+echo '[PASS] only fixed zM1 UART init command is sent'
 cp docs/zm1-uart-reverse.md dist/zm1-uart-reverse.md
 python3 tools/analyze_zm1_uart.py --reference 'reference/zM1@MK3080B@moc.ota.bin' --output dist/uart-protocol-report.txt
 python3 tools/kernel_report.py --sdk-kernel "$KERNEL" --output dist/kernel-report.txt
@@ -83,5 +84,6 @@ echo 'STA_VERIFIED_ON_HARDWARE=YES (v0.2.0)'
 echo 'WIFI_SCAN_ENABLED=NO'
 echo 'SENSOR_UART_VERIFIED_ON_HARDWARE=NO'
 echo 'SENSOR_PROTOCOL_STATUS=PARTIAL'
+echo 'SENSOR_ZM1_INIT_COMMAND_PRESENT=YES'
 echo 'SENSOR_VALUES_VERIFIED_ON_HARDWARE=NO'
 echo 'SAFE_TO_FLASH_FOR_HARDWARE_TEST=YES'

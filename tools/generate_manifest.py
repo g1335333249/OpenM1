@@ -21,7 +21,7 @@ symbols_valid = all(f'PASS {symbol}' in header for symbol in ('user_handler','mo
 sdk_valid = Path('mico-os').is_dir() and __import__('subprocess').check_output(['git','-C','mico-os','rev-parse','HEAD'], text=True).strip() == SDK_COMMIT
 kernel = require_sdk_kernel(a.sdk_kernel)
 valid = all(checks.values()) and header_valid and symbols_valid and sdk_valid and '5.4.1' in a.toolchain
-data = {'name':'OpenM1','firmware':'OpenM1','version':'0.3.0','board':'MK3080B','sdk_commit':SDK_COMMIT,
+data = {'name':'OpenM1','firmware':'OpenM1','version':'0.3.1','board':'MK3080B','sdk_commit':SDK_COMMIT,
         'kernel':'3080B002.023','kernel_version':'3080B002.023','sdk_kernel_version':'3080B002.023',
         'kernel_source':'mico-os/resources/moc_kernel/3080B/kernel.bin',
         'kernel_sha256':hashlib.sha256(kernel).hexdigest(),'interface_version':3,
@@ -51,7 +51,11 @@ data = {'name':'OpenM1','firmware':'OpenM1','version':'0.3.0','board':'MK3080B',
         'humidity_feature':True,'pm25_feature':True,'formaldehyde_feature':True,
         'sensor_values_verified_on_hardware':False,
         'sensor_uart':'MICO_UART_1','sensor_uart_tx_gpio':'GPIO9','sensor_uart_rx_gpio':'GPIO10',
-        'sensor_uart_default_baud':115200,'sensor_uart_passive_rx_only':True,
+        'sensor_uart_default_baud':115200,'sensor_uart_passive_rx_only':False,
+        'sensor_uart_tx_init_command_present':True,
+        'sensor_uart_init_command_source':'reference zM1 firmware static disassembly',
+        'sensor_uart_init_command':'23 02 64 01 00 00 00 00 00 00 00 21',
+        'sensor_uart_response_verified_on_hardware':False,
         'sensor_uart_rx_ring_size':2048,'sensor_uart_worker_stack':4096,
         'recovery_ip':'192.168.4.1','recovery_ssid_format':'OpenM1-XXXXXX',
         'ota_partition_start':'0x00110000','ota_partition_size':741376,

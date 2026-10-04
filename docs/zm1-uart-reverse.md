@@ -1,4 +1,4 @@
-# zM1 UART 静态逆向记录（OpenM1 v0.3.0）
+# zM1 UART 静态逆向记录（OpenM1 v0.3.1）
 
 协议状态：**PARTIAL**。以下地址均相对 `reference/zM1@MK3080B@moc.ota.bin` 的 APP payload（OTA `0x75008` 起）分析；原始 APP payload 的链接地址为 `0x08088008 + payload_offset`。参考 OTA SHA256 为 `20c5e6ae1692e3e047063b637b137635ab9e57711dba7c27ef0eb6cf1390887e`，APP payload 长度 `121036` 字节。参考文件不作修改。
 
@@ -6,7 +6,7 @@
 
 - `board/MK3080B/mico_board.h`：`MICO_UART_FOR_APP=MICO_UART_1`、`MICO_STDIO_UART=MICO_UART_2`；`board/MK3080B/mico_board.c`：UART1 TX=GPIO9、RX=GPIO10。UART2 保留给日志。
 - zM1 UART 线程 `0x0808c1c8` 载入立即数 `115200`，`0x0808c1cc` 写入配置结构的 baud；`0x0808c1d4` 写入 `3`（SDK `DATA_WIDTH_8BIT`）；其余配置字节为零，分别对应 `NO_PARITY`、`STOP_BITS_1` 和 `FLOW_CONTROL_DISABLED`。`0x0808c1e6` 调用 UART 初始化包装函数。因此默认 **115200 8N1，无硬件流控**，证据来自参考固件反汇编，而非推测。
-- `0x0808c1fe` 调用 UART 发送包装函数，把 APP `0x186cc` 的 12 字节 `23 02 64 01 00 00 00 00 00 00 00 21` 发出一次。它处于线程初始化路径，**没有证明它是周期 polling**；OpenM1 v0.3.0 不发送此帧。
+- `0x0808c1fe` 调用 UART 发送包装函数，把 APP `0x186cc` 的 12 字节 `23 02 64 01 00 00 00 00 00 00 00 21` 发出一次。它处于线程初始化路径，**没有证明它是周期 polling**。OpenM1 v0.3.1 在 UART 初始化后发送一次同样的帧；无其他自动命令。
 - `0x0808c208` 检查 RX ring 中是否多于 19 字节，`0x0808c23c` 复制 20 字节，`0x0808c26a` 消费 20 字节并调用 `0x0808be88` 解析。APP 的 `user_uart.c` 字符串在 payload `0x186e9`，包含 20 个 `%02X` 的 `UART GET::` 日志在 `0x1872e` 附近。
 
 ## 帧和字段证据
@@ -26,9 +26,9 @@ zM1 旧 JSON 格式字符串在 payload `0x18c06`：`temperature`、`humidity`�
 
 ## 实机验证与下一步证据
 
-1. 升级后先确认恢复热点、中文页面、OTA 仍可访问；本版 UART TX 保持静默。
+1. 升级后先确认恢复热点、中文页面、OTA 仍可访问；本版 UART TX 仅发送已确认的 zM1 初始化帧。
 2. 读取 `/api/uart/status` 和 `/api/uart/raw`，记录默认 115200 下至少数十秒，观察是否有 `23 ... 21` 的完整 20 字节帧。
 3. 将网页与 M1 正面屏幕的温度、湿度、PM2.5、甲醛逐项比对。尤其检查甲醛的第三位和温湿度小数倍率；允许少量更新时间差，不能接受百倍或千倍差异。
-4. 如 RX 长期为 0，提交这两个 API 的结果、屏幕读数、串口日志和测试时长。参考 zM1 存在一次启动 TX，但由于它可能承担初始化或请求作用，未经实机证据暂不发送。
+4. v0.3.0 实机确认 UART1 已初始化但 `rx_bytes=0`。v0.3.1 开始发送上述参考 zM1 启动帧。若 RX 仍长期为 0，提交这两个 API 的结果、`tx_frames`、`init_command_result`、屏幕读数、串口日志和测试时长；不要尝试其他未知命令。
 
 匿名示例帧尚不可给出：参考 OTA 只有代码，没有真实 UART 流。不能把人工拼造的帧当作实机样本。

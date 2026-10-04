@@ -5,6 +5,11 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Exact startup frame copied from the reference zM1 APP; no other TX exists. */
+static const uint8_t zm1_uart_init_command[12] = {
+    0x23,0x02,0x64,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x21
+};
+
 static uint8_t rx_storage[M1_UART_RX_RING_SIZE];
 static ring_buffer_t rx_ring;
 static uint8_t history[M1_UART_HISTORY_SIZE];
@@ -14,6 +19,10 @@ static uint32_t desired_baud=M1_UART_DEFAULT_BAUD;
 static uint32_t active_baud;
 static uint32_t rx_bytes;
 static uint32_t last_rx_ms;
+static uint32_t tx_bytes,tx_frames,last_tx_ms;
+static int init_command_sent,init_command_result;
+static uint32_t manual_request,manual_completed;
+static int manual_result,manual_pending;
 static unsigned history_head,history_count;
 static int worker_ready,uart_online;
 
@@ -39,8 +48,9 @@ static OSStatus open_uart(uint32_t baud)
 
 static void record_rx(const uint8_t *data, unsigned length)
 {
-    unsigned i;
+    unsigned i,first=0,show;
     mico_rtos_lock_mutex(&uart_mutex);
+    if (!rx_bytes) first=1;
     for (i=0;i<length;i++) {
         history[history_head]=data[i];
         history_head=(history_head+1)%M1_UART_HISTORY_SIZE;
@@ -49,7 +59,31 @@ static void record_rx(const uint8_t *data, unsigned length)
     rx_bytes+=length;
     last_rx_ms=mico_rtos_get_time();
     mico_rtos_unlock_mutex(&uart_mutex);
+    if (first) {
+        show=length>64?64:length;
+        printf("SENSOR: first RX data received\r\nSENSOR: RX first bytes:\r\n");
+        for (i=0;i<show;i++) printf("%02X%s",data[i],i+1<show?" ":"\r\n");
+    }
     m1_sensor_parse(data,length);
+}
+
+static OSStatus send_zm1_init_command(void)
+{
+    OSStatus err;
+    printf("SENSOR: sending zM1 init command\r\n");
+    printf("SENSOR: TX 23 02 64 01 00 00 00 00 00 00 00 21\r\n");
+    err=MicoUartSend(MICO_UART_FOR_APP,zm1_uart_init_command,sizeof(zm1_uart_init_command));
+    mico_rtos_lock_mutex(&uart_mutex);
+    last_tx_ms=mico_rtos_get_time();
+    init_command_result=err;
+    if (err==kNoErr) {
+        tx_bytes+=sizeof(zm1_uart_init_command);
+        tx_frames++;
+        init_command_sent=1;
+    }
+    mico_rtos_unlock_mutex(&uart_mutex);
+    printf("SENSOR: init command result = %d\r\n",err);
+    return err;
 }
 
 void m1_uart_worker(mico_thread_arg_t arg)
@@ -60,13 +94,17 @@ void m1_uart_worker(mico_thread_arg_t arg)
     OSStatus err;
     (void)arg;
     for (;;) {
+        int pending=0;
+        uint32_t request=0;
         mico_rtos_lock_mutex(&uart_mutex);
         wanted=desired_baud;
         mico_rtos_unlock_mutex(&uart_mutex);
         if (!uart_online || wanted!=active_baud) {
             if (uart_online) {
-                MicoUartFinalize(MICO_UART_FOR_APP);
+                mico_rtos_lock_mutex(&uart_mutex);
                 uart_online=0;
+                mico_rtos_unlock_mutex(&uart_mutex);
+                MicoUartFinalize(MICO_UART_FOR_APP);
             }
             err=open_uart(wanted);
             mico_rtos_lock_mutex(&uart_mutex);
@@ -79,6 +117,20 @@ void m1_uart_worker(mico_thread_arg_t arg)
                 continue;
             }
             printf("SENSOR: UART1 receive ready, %lu 8N1\r\n",(unsigned long)wanted);
+            printf("SENSOR: UART1 ready\r\n");
+            mico_thread_msleep(400);
+            send_zm1_init_command();
+        }
+        mico_rtos_lock_mutex(&uart_mutex);
+        if (manual_pending) {
+            pending=1; request=manual_request; manual_pending=0;
+        }
+        mico_rtos_unlock_mutex(&uart_mutex);
+        if (pending) {
+            err=send_zm1_init_command();
+            mico_rtos_lock_mutex(&uart_mutex);
+            manual_result=err; manual_completed=request;
+            mico_rtos_unlock_mutex(&uart_mutex);
         }
         available=MicoUartGetLengthInBuffer(MICO_UART_FOR_APP);
         if (!available) {
@@ -125,24 +177,62 @@ int m1_uart_set_baud(uint32_t baud)
     return 0;
 }
 
+int m1_uart_send_init_command(void)
+{
+    uint32_t request;
+    unsigned waited;
+    int result;
+    if (!worker_ready) return -2;
+    mico_rtos_lock_mutex(&uart_mutex);
+    if (!uart_online || desired_baud!=active_baud) {
+        mico_rtos_unlock_mutex(&uart_mutex);
+        return -2;
+    }
+    if (manual_pending || manual_request!=manual_completed) {
+        mico_rtos_unlock_mutex(&uart_mutex);
+        return -3;
+    }
+    request=++manual_request;
+    manual_pending=1;
+    mico_rtos_unlock_mutex(&uart_mutex);
+    for (waited=0;waited<3000;waited+=20) {
+        mico_thread_msleep(20);
+        mico_rtos_lock_mutex(&uart_mutex);
+        if (manual_completed==request) {
+            result=manual_result;
+            mico_rtos_unlock_mutex(&uart_mutex);
+            return result==kNoErr?0:-4;
+        }
+        mico_rtos_unlock_mutex(&uart_mutex);
+    }
+    return -5;
+}
+
 void m1_uart_status_json(char *out, size_t capacity)
 {
-    uint32_t baud,bytes,last;
-    int online;
+    uint32_t baud,bytes,last,tx_count,tx_frame_count,last_tx;
+    int online,sent,tx_result;
     m1_sensor_snapshot_t s;
     m1_sensor_get_snapshot(&s);
     if (worker_ready) {
         mico_rtos_lock_mutex(&uart_mutex);
         baud=active_baud;bytes=rx_bytes;last=last_rx_ms;online=uart_online;
+        tx_count=tx_bytes;tx_frame_count=tx_frames;last_tx=last_tx_ms;
+        sent=init_command_sent;tx_result=init_command_result;
         mico_rtos_unlock_mutex(&uart_mutex);
-    } else { baud=0;bytes=0;last=0;online=0; }
+    } else { baud=0;bytes=0;last=0;online=0;tx_count=0;tx_frame_count=0;last_tx=0;sent=0;tx_result=0; }
     snprintf(out,capacity,
              "{\"uart\":\"MICO_UART_1\",\"tx\":\"GPIO9\",\"rx\":\"GPIO10\",\"baud\":%lu,"
              "\"online\":%s,\"rx_bytes\":%lu,\"valid_frames\":%lu,\"invalid_frames\":%lu,"
-             "\"last_rx_ms\":%lu,\"last_rx_age_ms\":%lu,\"parser\":\"zm1-type1-partial\",\"protocol_verified\":false,\"passive_rx_only\":true}",
+             "\"last_rx_ms\":%lu,\"last_rx_age_ms\":%lu,\"tx_bytes\":%lu,\"tx_frames\":%lu,"
+             "\"last_tx_ms\":%lu,\"last_tx_age_ms\":%lu,\"init_command_sent\":%s,\"init_command_result\":%d,"
+             "\"parser\":\"zm1-type1-partial\",\"protocol_verified\":false,\"passive_rx_only\":false,\"fixed_init_command_only\":true}",
              (unsigned long)baud,online?"true":"false",(unsigned long)bytes,
              (unsigned long)s.frame_count,(unsigned long)s.parser_error_count,(unsigned long)last,
-             (unsigned long)(last?mico_rtos_get_time()-last:0));
+             (unsigned long)(last?mico_rtos_get_time()-last:0),
+             (unsigned long)tx_count,(unsigned long)tx_frame_count,(unsigned long)last_tx,
+             (unsigned long)(last_tx?mico_rtos_get_time()-last_tx:0),
+             sent?"true":"false",tx_result);
 }
 
 void m1_uart_raw_json(char *out, size_t capacity)

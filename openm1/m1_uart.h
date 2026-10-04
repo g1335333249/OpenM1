@@ -11,5 +11,6 @@
 OSStatus m1_uart_init(void);
 void m1_uart_worker(mico_thread_arg_t arg);
 int m1_uart_set_baud(uint32_t baud);
+int m1_uart_send_init_command(void);
 void m1_uart_status_json(char *out, size_t capacity);
 void m1_uart_raw_json(char *out, size_t capacity);

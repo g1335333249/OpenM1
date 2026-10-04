@@ -1,10 +1,10 @@
-# OpenM1 v0.3.0
+# OpenM1 v0.3.1
 
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
 ## 实机验证状态
 
-用户已在真实 M1 上验证 v0.2.0 的 Recovery SoftAP、动态 SSID、`192.168.4.1`、中文 Web 页面、手动 STA 家庭 Wi-Fi 连接、网页 OTA、Bootloader 应用升级及升级后自动恢复。OTA_TEMP 分区起始 `0x00110000`、长度 `0xB5000`（741376 字节）。**v0.3.0 新增的 UART 与传感器数值尚未实机验证；URL OTA 也尚未实机验证。** Manifest 分别记录已验证的基础设施和待验证的新功能。
+用户已在真实 M1 上验证 v0.2.0 的 Recovery SoftAP、动态 SSID、`192.168.4.1`、中文 Web 页面、手动 STA 家庭 Wi-Fi 连接、网页 OTA、Bootloader 应用升级及升级后自动恢复。v0.3.0 实机验证 UART1 初始化成功、115200 8N1 在线，但持续观察 `rx_bytes=0`。OTA_TEMP 分区起始 `0x00110000`、长度 `0xB5000`（741376 字节）。**v0.3.1 的启动帧响应及传感器数值尚未实机验证；URL OTA 也尚未实机验证。**
 
 恢复热点名称由设备 Wi-Fi MAC 的最后 3 字节生成，格式为 **`OpenM1-XXXXXX`**，例如 MAC `34:EA:34:12:AB:CD` 对应 `OpenM1-12ABCD`。若 MAC 读取结果无效，则使用 `OpenM1-RECOVERY` 并输出故障日志。热点开放、无密码，地址固定为 `192.168.4.1/24`，DHCP Server 开启，HTTP 监听 TCP 80。任何家庭 Wi-Fi 凭据只保存在运行时 RAM；**每次重启都会先启动恢复热点和 OTA 服务，不自动连接家庭 Wi-Fi。** 不要在不可信网络暴露此无认证管理界面。
 
@@ -29,6 +29,7 @@
 | `GET /api/uart/status` | UART1 波特率、收包和解析统计 |
 | `GET /api/uart/raw` | 最近 128 字节 HEX（内存保留最近 1024 字节） |
 | `POST /api/uart/config` | JSON `{"baud":115200}`，支持 9600、19200、38400、57600、115200 |
+| `POST /api/uart/init` | 无请求体；仅重发一次参考 zM1 固件中确认的固定 12 字节初始化帧 |
 
 SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结束符，对应 SDK 的 `wifi_ssid[32]` 和 `wifi_key[64]`。页面刷新后密码输入框为空；密码不会出现在日志、`/api/info` 或 `/api/wifi/status` 中。STA 连接由 4096 字节栈的独立线程执行，最多等待 30 秒。只有 `micoWlanGetLinkStatus().is_connected == 1` 且 `micoWlanGetIPStatus(..., Station)` 返回有效 IP 才认定连接成功。断开调用 `micoWlanSuspendStation()`，不会调用会停止两种接口的 `micoWlanSuspend()`。
 
@@ -38,19 +39,19 @@ SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结�
 
 扫描 API 为异步 `micoWlanStartScan()`，其结果依赖 `mico_notify_WIFI_SCAN_COMPLETED` 回调；当前 MOC Kernel 扫描期间是否保持恢复热点尚未实机确认，因此本版不启动扫描，也不调用完整 `mico_system_init()`。页面保留手工输入。
 
-## 传感器桥接与只读诊断
+## 传感器桥接与串口诊断
 
 业务串口使用 SDK 的 `MICO_UART_FOR_APP`（UART1，TX GPIO9、RX GPIO10）；UART2 继续用于调试输出。参考 zM1 APP 的反汇编显示 UART1 使用 **115200 8N1**，20 字节帧以 `#` 开头、`!` 结尾，类型 `0x01` 含传感器字段。完整证据和地址见 [zM1 UART 逆向记录](docs/zm1-uart-reverse.md)。OpenM1 在 UART worker 中使用 2048 字节 RX ring、1024 字节原始数据历史和 4096 字节线程栈；初始化失败不会停止 Recovery。网页每秒读取 `/api/sensors`，并提供折叠的串口诊断区和运行时波特率切换。
 
-**协议状态为 PARTIAL。** 参考 APP 对类型 `0x01` 仅检查固定长度、首尾和字段，未发现明确的 checksum/CRC 比对；OpenM1 增加取值范围筛查，但不会把结构有效帧称为“校验和通过”。所有数值在首次完整类型 `0x01` 帧出现前为 `null`，页面显示 `--`。zM1 启动时有一次 12 字节 UART 发送，但没有找到必须周期发送的证据；本版 **PASSIVE RX ONLY**，没有任何 `MicoUartSend()` 调用，也不修改 ATSAMD20 固件。
+**协议状态为 PARTIAL。** 参考 APP 对类型 `0x01` 仅检查固定长度、首尾和字段，未发现明确的 checksum/CRC 比对；OpenM1 增加取值范围筛查，但不会把结构有效帧称为“校验和通过”。所有数值在首次完整类型 `0x01` 帧出现前为 `null`，页面显示 `--`。v0.3.0 实机持续观察到 UART1 `rx_bytes=0`；zM1 参考 APP 在 UART 初始化后发送过一次固定 12 字节帧。因此 v0.3.1 在 UART1 初始化成功后等待 400 ms，发送 **`23 02 64 01 00 00 00 00 00 00 00 21`** 一次；网页切换波特率并重新初始化后也发送一次。`POST /api/uart/init` 可手工重发同一帧。其业务含义尚未确认，**没有任意 HEX 发送接口，也不周期 polling**。
 
-实机测试时请把网页温度、湿度、PM2.5、甲醛与 M1 正面屏幕逐项对比，尤其核对甲醛的小数倍率。若收不到任何数据，请提供 `/api/uart/status`、`/api/uart/raw`、测试持续时间、串口日志和屏幕读数；不要自行向 ATSAMD20 发送未知命令。MQTT、屏幕 Wi-Fi 图标和传感器直驱留待后续版本。
+实机测试时先观察 `SENSOR: init command result`、`tx_frames` 和 `rx_bytes`，再把网页温度、湿度、PM2.5、甲醛与 M1 正面屏幕逐项对比，尤其核对甲醛的小数倍率。若仍收不到任何数据，请提供 `/api/uart/status`、`/api/uart/raw`、测试持续时间和串口日志；不要自行向 ATSAMD20 发送其他命令。MQTT、屏幕 Wi-Fi 图标和传感器直驱留待后续版本。
 
 ## OTA 格式与恢复
 
 完整 MOC OTA 由 Kernel、填充到 `0x75000`、8 字节 APP 头、APP payload、末尾 16 字节 raw MD5 组成。上传或 URL 下载时使用 2048 字节静态缓冲流式写入 `MICO_PARTITION_OTA_TEMP`，然后从 Flash 回读长度、两份 APP CRC、payload CRC 和整个 OTA（不含尾部 MD5）的 MD5；另外计算 boot table 所需 CRC16。验证成功才调用 `mico_ota_switch_to_new_fw(total_size - 16, boot_crc16)`，发送 HTTP 成功响应，等待两秒后 `MicoSystemReboot()`。任一校验失败不写升级标志、不重启。最大 OTA 文件限制为分区实际长度与 `0xB5000` 两者较小值。
 
-`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.3.0 的 UART/传感器值已通过实机验证。** 当前屏幕 Wi-Fi 图标不亮暂不处理。
+`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.3.1 的 UART 响应或传感器值已通过实机验证。** 当前屏幕 Wi-Fi 图标不亮暂不处理。
 
 ## 构建与验证
 
@@ -68,9 +69,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.3.0@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.3.1@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.3.0.bin
+  --app dist/OpenM1-v0.3.1.bin
 ```
 
-GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.3.0`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 逆向报告和构建日志。首次使用 v0.3.0 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
+GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.3.1`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 逆向报告和构建日志。首次使用 v0.3.1 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
