@@ -62,7 +62,7 @@ jobs:
           url = f'https://github.com/{os.environ["GITHUB_REPOSITORY"]}/releases/download/{tag}/{name}'
           Path('dist/latest.json').write_text(json.dumps({'name':'OpenM1','version':m['version'],'url':url,'sha256':m['sha256'],'size':m['size']}, indent=2)+'\n')
           PY
-          cd dist && sha256sum OpenM1-v0.0.1* manifest.json kernel_compare.txt build.log > SHA256SUMS.txt
+          cd dist && sha256sum OpenM1-v0.0.1* manifest.json latest.json kernel_compare.txt build.log > SHA256SUMS.txt
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

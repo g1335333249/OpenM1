@@ -4,13 +4,14 @@ import argparse
 import hashlib
 import struct
 from pathlib import Path
-from ota_common import APP_OFFSET, OTA_MAX_SIZE, crc16
+from ota_common import APP_OFFSET, OTA_MAX_SIZE, REFERENCE_SHA256, crc16
 
 
 def verify(path, reference):
     data = Path(path).read_bytes()
     ref = Path(reference).read_bytes()
     checks = {}
+    checks["reference identity"] = hashlib.sha256(ref).hexdigest() == REFERENCE_SHA256
     checks["app offset"] = len(data) > APP_OFFSET + 8 + 16
     if not checks["app offset"]:
         return checks, {}

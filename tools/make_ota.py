@@ -3,7 +3,7 @@
 import argparse
 import hashlib
 from pathlib import Path
-from ota_common import APP_OFFSET, OTA_MAX_SIZE, app_record, compare_kernel
+from ota_common import APP_OFFSET, OTA_MAX_SIZE, app_record, compare_kernel, require_reference
 
 
 def main():
@@ -17,7 +17,7 @@ def main():
     a = p.parse_args()
     if not a.reference.is_file():
         p.error("REFERENCE OTA REQUIRED FOR FIRST-MIGRATION SAFETY CHECK")
-    ref = a.reference.read_bytes()
+    ref = require_reference(a.reference)
     if len(ref) < APP_OFFSET:
         p.error("reference OTA kernel region is truncated")
     compare_kernel(a.reference, a.sdk_kernel, a.kernel_report)

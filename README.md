@@ -6,7 +6,7 @@ OpenM1 is an experimental replacement for the zM1 user application on the Phicom
 
 ## Current stage
 
-Version 0.0.1 builds an application that prints a startup banner, tries the stored MiCO Wi-Fi credentials, starts `OpenM1-XXXX` SoftAP after 30 seconds without an IP address, serves a small status page and `GET /api/info`, accepts `POST /api/ota`, and records UART1 RX bytes as hex. The SoftAP is **open, without a password**, at `192.168.4.1`. UART1 is provisionally configured for 115200 8N1; its physical connection and baud rate have not been measured on an M1.
+Version 0.0.1 builds an application that prints a startup banner, uses the MiCO system monitor to service the watchdog independently of logging, tries the stored MiCO Wi-Fi credentials, starts `OpenM1-XXXX` SoftAP after 30 seconds without an IP address, serves a small status page and `GET /api/info`, accepts `POST /api/ota`, and records UART1 RX bytes as hex. The SoftAP is **open, without a password**, at `192.168.4.1`. UART1 is provisionally configured for 115200 8N1; its physical connection and baud rate have not been measured on an M1.
 
 The OTA endpoint accepts JSON such as `{"url":"http://server/OpenM1-v0.0.2@MK3080B@moc.ota.bin"}`. It accepts plain HTTP and requires `Content-Length`. It writes only to the MiCO `MICO_PARTITION_OTA_TEMP` partition, reads the image back, checks APP length, duplicated CRC, APP CRC16, and trailing binary MD5, then calls the MiCO upgrade marker API and reboots. It does not send OTA commands to any device from CI. The first physical migration and subsequent upgrade have **not** been tested on hardware; successful static checks cannot establish runtime compatibility with the reference MOC kernel.
 

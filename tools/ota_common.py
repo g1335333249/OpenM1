@@ -6,6 +6,14 @@ from pathlib import Path
 APP_OFFSET = 0x75000
 OTA_MAX_SIZE = 0xB5000
 SDK_COMMIT = "9b09de78164940ff3876d2053f8e7dd42ca2b8ba"
+REFERENCE_SHA256 = "20c5e6ae1692e3e047063b637b137635ab9e57711dba7c27ef0eb6cf1390887e"
+
+
+def require_reference(path):
+    ref = Path(path).read_bytes()
+    if hashlib.sha256(ref).hexdigest() != REFERENCE_SHA256:
+        raise ValueError("reference OTA identity mismatch; expected supplied zM1 image")
+    return ref
 
 
 def crc16(data):
@@ -31,7 +39,7 @@ def app_record(compiler_bin):
 
 
 def compare_kernel(reference, sdk, report):
-    ref = Path(reference).read_bytes()[:APP_OFFSET]
+    ref = require_reference(reference)[:APP_OFFSET]
     sdk_bytes = Path(sdk).read_bytes()
     padded = sdk_bytes.ljust(APP_OFFSET, b"\xff")
     first = next((i for i, (a, b) in enumerate(zip(ref, padded)) if a != b), None)

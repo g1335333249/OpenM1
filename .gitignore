@@ -6,4 +6,5 @@ __pycache__/
 *.pyc
 /.gdbinit
 /.openocd_cfg
+/.project
 /build-local.log
