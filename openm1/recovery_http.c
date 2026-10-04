@@ -1,11 +1,15 @@
 #include "recovery.h"
 #include "wifi_manager.h"
+#include "m1_uart.h"
+#include "m1_sensor.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
 static mico_thread_t server_thread;
+static volatile int http_listening;
+int recovery_http_ready(void) { return http_listening; }
 int recovery_send_all(int fd, const void *data, size_t len)
 {
     const uint8_t *p=data;
@@ -168,9 +172,15 @@ static void handle_client(int fd)
             recovery_send_json(fd,200,wifi_manager_scan_json());
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.2.0\",\"version\":\"0.2.0\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.3.0\",\"version\":\"0.3.0\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/sensors")) {
+            m1_sensor_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/uart/status")) {
+            m1_uart_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/uart/raw")) {
+            m1_uart_raw_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else recovery_send_json(fd,404,"{\"message\":\"Not found\"}");
         goto done;
     }
@@ -209,6 +219,28 @@ static void handle_client(int fd)
         if (wifi_manager_disconnect()==0)
             recovery_send_json(fd,200,"{\"ok\":true,\"message\":\"已断开家庭 Wi-Fi，恢复热点仍保持开启。\"}");
         else recovery_send_json(fd,503,"{\"message\":\"断开家庭 Wi-Fi 失败。\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/uart/config")) {
+        char body[65]; unsigned long baud; int consumed=0,result;
+        if (!seen || !length || length>64 || body_len>length) {
+            recovery_send_json(fd,400,"{\"message\":\"串口配置请求长度无效。\"}"); goto done;
+        }
+        memcpy(body,request+body_start,body_len);
+        while (body_len<length) {
+            n=recv(fd,body+body_len,length-body_len,0);
+            if (n<=0) { recovery_send_json(fd,400,"{\"message\":\"串口配置请求中断。\"}"); goto done; }
+            body_len+=(size_t)n;
+        }
+        body[length]=0;
+        if (sscanf(body," { \"baud\" : %lu } %n",&baud,&consumed)!=1 ||
+            consumed!=(int)length || baud>UINT32_MAX) {
+            recovery_send_json(fd,400,"{\"message\":\"波特率格式无效。\"}"); goto done;
+        }
+        result=m1_uart_set_baud((uint32_t)baud);
+        if (result==-1) recovery_send_json(fd,400,"{\"message\":\"不支持该波特率。\"}");
+        else if (result) recovery_send_json(fd,503,"{\"message\":\"业务串口尚未就绪。\"}");
+        else recovery_send_json(fd,202,"{\"ok\":true,\"message\":\"正在切换业务串口波特率。\"}");
         goto done;
     }
     if (!strcmp(path,"/api/ota/upload") || !strcmp(path,"/api/ota/url")) {
@@ -271,6 +303,7 @@ static void recovery_http_server_thread(mico_thread_arg_t arg)
         }
         printf("RECOVERY: HTTP server listening on 0.0.0.0:80\r\n");
         printf("RECOVERY: OTA service ready\r\n");
+        http_listening=1;
         for (;;) {
             client=accept(listener,NULL,NULL);
             if (client>=0) handle_client(client);

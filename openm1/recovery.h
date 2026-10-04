@@ -15,6 +15,7 @@ void recovery_set_identity(const char *ssid, const char *mac);
 const char *recovery_ssid(void);
 const char *recovery_mac(void);
 OSStatus recovery_http_start(void);
+int recovery_http_ready(void);
 void recovery_ota_partition_log(void);
 void recovery_ota_status_json(char *out, size_t size);
 int recovery_ota_begin(int fd, int is_url, uint32_t length, const uint8_t *initial, size_t initial_len);

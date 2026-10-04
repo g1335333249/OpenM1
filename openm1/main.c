@@ -2,6 +2,7 @@
 #include "mico_wlan.h"
 #include "recovery.h"
 #include "wifi_manager.h"
+#include "m1_uart.h"
 
 int main(void)
 {
@@ -17,7 +18,7 @@ int main(void)
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.2.0\r\n"
+           "Version: 0.3.0\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -78,10 +79,16 @@ int main(void)
         printf("RECOVERY: WiFi ready\r\n");
         printf("RECOVERY: IP = %s\r\n", RECOVERY_IP);
         recovery_ota_partition_log();
-        if (recovery_http_start() != kNoErr)
+        result=recovery_http_start();
+        if (result != kNoErr)
             printf("RECOVERY: HTTP server failed to start\r\n");
         else if (wifi_manager_init() != kNoErr)
             printf("WIFI: manager initialization failed\r\n");
+        if (result==kNoErr) {
+            while (!recovery_http_ready()) mico_thread_msleep(100);
+            if (m1_uart_init() != kNoErr)
+                printf("SENSOR: UART diagnostic initialization failed; Recovery remains active\r\n");
+        }
     }
     for (;;) {
         mico_thread_msleep(10000);
