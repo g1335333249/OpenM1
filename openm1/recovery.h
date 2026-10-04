@@ -2,7 +2,7 @@
 #include "mico.h"
 #include <stdint.h>
 
-#define RECOVERY_SSID "OpenM1-Recovery"
+#define RECOVERY_SSID_PREFIX "OpenM1-Recovery"
 #define RECOVERY_IP "192.168.4.1"
 #define RECOVERY_HTTP_STACK 6144
 #define RECOVERY_OTA_STACK 5120
@@ -11,6 +11,8 @@
 
 void recovery_set_rf(const char *version);
 const char *recovery_rf(void);
+void recovery_set_mac(const uint8_t mac[6]);
+const char *recovery_ssid(void);
 OSStatus recovery_http_start(void);
 void recovery_ota_partition_log(void);
 void recovery_ota_status_json(char *out, size_t size);

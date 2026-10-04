@@ -22,6 +22,7 @@ static mico_thread_t ota_thread;
 static mico_mutex_t status_mutex;
 static int mutex_ready;
 static char rf_text[64] = "unavailable";
+static char ssid_text[32] = RECOVERY_SSID_PREFIX;
 static struct {
     const char *state;
     uint32_t received;
@@ -40,6 +41,12 @@ void recovery_set_rf(const char *version)
     }
 }
 const char *recovery_rf(void) { return rf_text; }
+void recovery_set_mac(const uint8_t mac[6])
+{
+    snprintf(ssid_text, sizeof(ssid_text), RECOVERY_SSID_PREFIX "-%02X%02X%02X",
+             mac[3], mac[4], mac[5]);
+}
+const char *recovery_ssid(void) { return ssid_text; }
 static void lock_status(void) { if (mutex_ready) mico_rtos_lock_mutex(&status_mutex); }
 static void unlock_status(void) { if (mutex_ready) mico_rtos_unlock_mutex(&status_mutex); }
 static void set_status(const char *state, const char *message, uint32_t received, uint32_t total)
@@ -224,7 +231,7 @@ static int url_download(const char *url)
     struct sockaddr_in address; int remote=-1,n,header_len=0,body_at=-1,code=0;
     unsigned long length=0; char *line,*next;
     int parsed=parse_url(url,host,sizeof(host),&port,&path);
-    if (parsed==-2) { fail("HTTPS is not supported in Recovery v0.1.0"); return 0; }
+    if (parsed==-2) { fail("HTTPS is not supported in Recovery v0.1.1"); return 0; }
     if (parsed) { fail("Invalid HTTP URL"); return 0; }
     resolved=gethostbyname(host);
     if (!resolved || !resolved->h_addr) { fail("DNS lookup failed"); return 0; }

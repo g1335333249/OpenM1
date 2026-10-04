@@ -109,8 +109,8 @@ static void handle_client(int fd)
             recovery_ota_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"Phicomm M1\",\"firmware\":\"OpenM1 Recovery v0.1.0\",\"version\":\"0.1.0\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"Recovery SoftAP\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
-                     recovery_rf(),RECOVERY_SSID,RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
+            snprintf(json,sizeof(json),"{\"device\":\"Phicomm M1\",\"firmware\":\"OpenM1 Recovery v0.1.1\",\"version\":\"0.1.1\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"Recovery SoftAP\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+                     recovery_rf(),recovery_ssid(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else recovery_send_json(fd,404,"{\"message\":\"Not found\"}");
         goto done;
@@ -138,7 +138,7 @@ static void handle_client(int fd)
                 recovery_send_json(fd,400,"{\"message\":\"Invalid URL JSON\"}"); goto done;
             }
             if (!strncmp(url,"https://",8)) {
-                recovery_send_json(fd,400,"{\"message\":\"HTTPS is not supported in Recovery v0.1.0\"}"); goto done;
+                recovery_send_json(fd,400,"{\"message\":\"HTTPS is not supported in Recovery v0.1.1\"}"); goto done;
             }
             if (strncmp(url,"http://",7)) { recovery_send_json(fd,400,"{\"message\":\"HTTP URL required\"}"); goto done; }
             if (!recovery_ota_begin(fd,1,0,(uint8_t*)url,strlen(url))) {
