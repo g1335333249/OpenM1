@@ -7,6 +7,7 @@ static m1_sensor_snapshot_t sensor;
 static int sensor_ready;
 static uint8_t frame[20];
 static unsigned frame_used;
+static int first_sensor_logged;
 
 static void accept_frame(const uint8_t f[20])
 {
@@ -15,6 +16,7 @@ static void accept_frame(const uint8_t f[20])
     float temperature=(float)f[5]+(float)(f[6]/10u)/10.0f;
     float humidity=(float)f[7]+(float)(f[8]/10u)/10.0f;
     float formaldehyde=(float)hcho/1000.0f;
+    unsigned i;
     int tv=f[6]<=99 && temperature>=-40.0f && temperature<=100.0f;
     int hv=f[8]<=99 && humidity<=100.0f;
     int pv=pm25<=2000;
@@ -32,6 +34,13 @@ static void accept_frame(const uint8_t f[20])
         sensor.invalid_frames++;
     }
     mico_rtos_unlock_mutex(&sensor_mutex);
+    if (!first_sensor_logged) {
+        first_sensor_logged=1;
+        printf("SENSOR: first sensor frame received\r\nSENSOR: first frame HEX: ");
+        for (i=0;i<20;i++) printf("%02X%s",f[i],i<19?" ":"\r\n");
+        printf("SENSOR: T=%.1fC H=%.1f%% PM2.5=%u HCHO=%.3f mg/m3\r\n",
+               (double)temperature,(double)humidity,pm25,(double)formaldehyde);
+    }
 }
 
 static void accept_time_frame(const uint8_t f[20])

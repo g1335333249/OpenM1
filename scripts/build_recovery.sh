@@ -3,12 +3,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.4.0
+PREFIX=OpenM1-v0.4.1
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 TOOL=.micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/Linux64/bin
 [[ "$(git -C mico-os rev-parse HEAD)" == "$SDK_COMMIT" ]]
 echo '[PASS] SDK commit'
 python3 tools/embed_page.py --check
+python3 tests/test_web_tabs.py
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_sensor.c openm1/m1_sensor.c -o /tmp/openm1-sensor-test
 /tmp/openm1-sensor-test
 cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_ha_policy.c openm1/ha_policy.c -o /tmp/openm1-ha-policy-test
@@ -28,8 +29,8 @@ echo '[PASS] GCC 5.4.1'
 set -o pipefail
 make -f mico-os/makefiles/Makefile openm1@MK3080B@moc HOST_OS=Linux64 TOOLS_ROOT=./.micoder SOURCE_ROOT=./ VERBOSE=1 2>&1 | tee build.log
 mkdir -p dist/recovery
-APP_BIN="$(find build -type f -name 'openm1@MK3080B@moc.bin' -print -quit)"
-[[ -n "$APP_BIN" ]]
+APP_BIN='build/openm1@MK3080B@moc/binary/openm1@MK3080B@moc.bin'
+[[ -f "$APP_BIN" ]]
 APP_ELF="${APP_BIN%.bin}.elf"
 APP_MAP="${APP_BIN%.bin}.map"
 cp "$APP_BIN" "dist/$PREFIX.bin"
@@ -42,7 +43,7 @@ for symbol in recovery_http_server_thread recovery_ota_upload_handler recovery_o
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
-for symbol in m1_uart_init m1_uart_worker m1_uart_send_init_command zm1_uart_init_command mico_uart_send m1_sensor_parse m1_sensor_get_snapshot; do
+for symbol in m1_uart_init m1_uart_worker m1_uart_send_init_command m1_uart_request_sensors zm1_uart_init_command zm1_sensor_request mico_uart_send m1_sensor_parse m1_sensor_get_snapshot; do
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
@@ -53,7 +54,7 @@ done
 grep -Fq 'mico_notify_WIFI_SCAN_ADV_COMPLETED' openm1/wifi_manager.c
 grep -Fq 'micoWlanStartScanAdv()' openm1/wifi_manager.c
 echo '[PASS] SDK advanced scan callback and API'
-for route in /api/wifi/status /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/sensors /api/uart/status /api/uart/raw /api/uart/config /api/uart/init /api/mqtt/status /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
+for route in /api/wifi/status /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/sensors /api/uart/status /api/uart/raw /api/uart/config /api/uart/init /api/uart/sensor-request /api/ota/status /api/ota/upload /api/ota/url /api/reboot /api/mqtt/status /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
   if ! "$TOOL/arm-none-eabi-strings" "dist/$PREFIX.elf" | grep -F "$route" >/dev/null; then echo "[FAIL] missing route $route"; exit 1; fi
   echo "[PASS] $route"
 done
@@ -64,7 +65,7 @@ python3 tools/check_uart_init_command.py
 if grep -En 'MICO_STDIO_UART|/api/uart/send' openm1/m1_uart.c openm1/m1_sensor.c openm1/recovery_http.c; then
   echo '[FAIL] sensor bridge must leave STDIO UART alone and forbid arbitrary TX'; exit 1
 fi
-echo '[PASS] only fixed zM1 UART init command is sent'
+echo '[PASS] only two fixed zM1 UART commands can be sent'
 cp docs/zm1-uart-reverse.md dist/zm1-uart-reverse.md
 cp docs/zm1-wifi-icon-reverse.md docs/mqtt.md docs/homeassistant.md dist/
 python3 tools/analyze_zm1_uart.py --reference 'reference/zM1@MK3080B@moc.ota.bin' --output dist/uart-protocol-report.txt
@@ -94,8 +95,9 @@ echo 'STA_VERIFIED_ON_HARDWARE=YES (v0.2.0)'
 echo 'WIFI_SCAN_FEATURE_PRESENT=YES; HARDWARE_VERIFIED=NO'
 echo 'WIFI_ICON_PROTOCOL_VERIFIED=NO; NO NEW UART TX'
 echo 'MQTT_AND_HOMEASSISTANT_FEATURE_PRESENT=YES; HARDWARE_VERIFIED=NO'
-echo 'SENSOR_UART_VERIFIED_ON_HARDWARE=NO'
+echo 'SENSOR_UART_VERIFIED_ON_HARDWARE=YES (type 0x0C and 0x0F received)'
 echo 'SENSOR_PROTOCOL_STATUS=PARTIAL'
 echo 'SENSOR_ZM1_INIT_COMMAND_PRESENT=YES'
+echo 'SENSOR_ONE_SHOT_REQUEST_PRESENT=YES; AUTO_POLLING=NO; HARDWARE_VERIFIED=NO'
 echo 'SENSOR_VALUES_VERIFIED_ON_HARDWARE=NO'
 echo 'SAFE_TO_FLASH_FOR_HARDWARE_TEST=YES'

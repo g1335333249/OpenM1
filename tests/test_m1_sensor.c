@@ -13,6 +13,7 @@ int main(void)
 {
     m1_sensor_snapshot_t s;
     char json[512];
+    /* Synthetic type 0x01 frame: not a captured M1 sensor sample. */
     const uint8_t frame[20]={'#',1,0,36,0,25,60,48,20,0,12,0,0,0,0,0,0,0,0,'!'};
     const uint8_t time_frames[4][20]={
         {'#',0x0c,0x07,0xea,0x0a,0x05,0x07,0x00,0x2f,0,0,0,0,0,0,0,0,0,0,'!'},
@@ -63,6 +64,14 @@ int main(void)
     assert(s.type0f_frames==2 && s.type18_frames==1 && s.unknown_frames==1);
     assert(s.invalid_frames==1 && s.type0f_last_value==1 && s.type0f_last_rx_ms==13000);
     assert(strcmp(s.m1_datetime,"2026-10-05 07:03:40")==0);
+    {
+        uint8_t stream[43] = {0x11,0x22,0x33};
+        memcpy(stream+3,frame,20);
+        memcpy(stream+23,frame,20);
+        m1_sensor_parse(stream,sizeof(stream)); /* bad prefix and two sticky frames */
+        m1_sensor_get_snapshot(&s);
+        assert(s.total_frames==12 && s.sensor_frames==4);
+    }
     puts("M1_SENSOR_PARSER_PASS");
     return 0;
 }

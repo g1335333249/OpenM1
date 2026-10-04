@@ -5,9 +5,12 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Exact startup frame copied from the reference zM1 APP; no other TX exists. */
+/* Exact frames found in the reference zM1 APP. No arbitrary UART TX. */
 static const uint8_t zm1_uart_init_command[12] = {
     0x23,0x02,0x64,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x21
+};
+static const uint8_t zm1_sensor_request[12] = {
+    0x23,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x21
 };
 
 static uint8_t rx_storage[M1_UART_RX_RING_SIZE];
@@ -22,7 +25,7 @@ static uint32_t last_rx_ms;
 static uint32_t tx_bytes,tx_frames,last_tx_ms;
 static int init_command_sent,init_command_result;
 static uint32_t manual_request,manual_completed;
-static int manual_result,manual_pending;
+static int manual_result,manual_pending,manual_kind;
 static unsigned history_head,history_count;
 static int worker_ready,uart_online;
 
@@ -86,6 +89,23 @@ static OSStatus send_zm1_init_command(void)
     return err;
 }
 
+static OSStatus send_zm1_sensor_request(void)
+{
+    OSStatus err;
+    printf("SENSOR: sending one zM1 sensor request\r\n");
+    printf("SENSOR: TX 23 01 00 00 00 00 00 00 00 00 00 21\r\n");
+    err=MicoUartSend(MICO_UART_FOR_APP,zm1_sensor_request,sizeof(zm1_sensor_request));
+    mico_rtos_lock_mutex(&uart_mutex);
+    last_tx_ms=mico_rtos_get_time();
+    if (err==kNoErr) {
+        tx_bytes+=sizeof(zm1_sensor_request);
+        tx_frames++;
+    }
+    mico_rtos_unlock_mutex(&uart_mutex);
+    printf("SENSOR: sensor request result = %d\r\n",err);
+    return err;
+}
+
 void m1_uart_worker(mico_thread_arg_t arg)
 {
     uint8_t batch[128];
@@ -94,7 +114,7 @@ void m1_uart_worker(mico_thread_arg_t arg)
     OSStatus err;
     (void)arg;
     for (;;) {
-        int pending=0;
+        int pending=0,kind=0;
         uint32_t request=0;
         mico_rtos_lock_mutex(&uart_mutex);
         wanted=desired_baud;
@@ -123,11 +143,11 @@ void m1_uart_worker(mico_thread_arg_t arg)
         }
         mico_rtos_lock_mutex(&uart_mutex);
         if (manual_pending) {
-            pending=1; request=manual_request; manual_pending=0;
+            pending=1; request=manual_request;kind=manual_kind;manual_pending=0;
         }
         mico_rtos_unlock_mutex(&uart_mutex);
         if (pending) {
-            err=send_zm1_init_command();
+            err=kind==2?send_zm1_sensor_request():send_zm1_init_command();
             mico_rtos_lock_mutex(&uart_mutex);
             manual_result=err; manual_completed=request;
             mico_rtos_unlock_mutex(&uart_mutex);
@@ -179,7 +199,7 @@ int m1_uart_set_baud(uint32_t baud)
     return 0;
 }
 
-int m1_uart_send_init_command(void)
+static int request_fixed_command(int kind)
 {
     uint32_t request;
     unsigned waited;
@@ -195,6 +215,7 @@ int m1_uart_send_init_command(void)
         return -3;
     }
     request=++manual_request;
+    manual_kind=kind;
     manual_pending=1;
     mico_rtos_unlock_mutex(&uart_mutex);
     for (waited=0;waited<3000;waited+=20) {
@@ -208,6 +229,16 @@ int m1_uart_send_init_command(void)
         mico_rtos_unlock_mutex(&uart_mutex);
     }
     return -5;
+}
+
+int m1_uart_send_init_command(void)
+{
+    return request_fixed_command(1);
+}
+
+int m1_uart_request_sensors(void)
+{
+    return request_fixed_command(2);
 }
 
 void m1_uart_status_json(char *out, size_t capacity)
@@ -226,15 +257,16 @@ void m1_uart_status_json(char *out, size_t capacity)
     snprintf(out,capacity,
              "{\"uart\":\"MICO_UART_1\",\"tx\":\"GPIO9\",\"rx\":\"GPIO10\",\"baud\":%lu,"
              "\"online\":%s,\"rx_bytes\":%lu,\"total_frames\":%lu,\"sensor_frames\":%lu,"
-             "\"time_frames\":%lu,\"type0f_frames\":%lu,\"type18_frames\":%lu,"
+             "\"time_frames\":%lu,\"type0f_frames\":%lu,\"brightness_frames\":%lu,\"type18_frames\":%lu,"
              "\"unknown_frames\":%lu,\"invalid_frames\":%lu,\"m1_datetime\":\"%s\","
              "\"type0f_last_value\":%u,\"type0f_last_rx_ms\":%lu,"
              "\"last_rx_ms\":%lu,\"last_rx_age_ms\":%lu,\"tx_bytes\":%lu,\"tx_frames\":%lu,"
              "\"last_tx_ms\":%lu,\"last_tx_age_ms\":%lu,\"init_command_sent\":%s,\"init_command_result\":%d,"
-             "\"parser\":\"zm1-type1-partial\",\"protocol_verified\":false,\"passive_rx_only\":false,\"fixed_init_command_only\":true}",
+             "\"parser\":\"zm1-type1-partial\",\"protocol_verified\":false,\"passive_rx_only\":false,\"fixed_init_command_only\":false,\"fixed_commands_only\":true,\"sensor_auto_polling\":false}",
              (unsigned long)baud,online?"true":"false",(unsigned long)bytes,
              (unsigned long)s.total_frames,(unsigned long)s.sensor_frames,
              (unsigned long)s.time_frames,(unsigned long)s.type0f_frames,
+             (unsigned long)s.type0f_frames,
              (unsigned long)s.type18_frames,(unsigned long)s.unknown_frames,
              (unsigned long)s.invalid_frames,s.m1_datetime,
              (unsigned)s.type0f_last_value,(unsigned long)s.type0f_last_rx_ms,

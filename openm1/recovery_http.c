@@ -196,7 +196,7 @@ static void handle_client(int fd)
             homeassistant_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.4.0\",\"version\":\"0.4.0\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.4.1\",\"version\":\"0.4.1\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -306,6 +306,19 @@ static void handle_client(int fd)
         else if (result==-2) recovery_send_json(fd,503,"{\"ok\":false,\"error\":\"UART1 is not ready\"}");
         else if (result==-5) recovery_send_json(fd,503,"{\"ok\":false,\"error\":\"UART init command timed out\"}");
         else recovery_send_json(fd,503,"{\"ok\":false,\"error\":\"UART init command send failed\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/uart/sensor-request")) {
+        int result;
+        if ((seen && length) || body_len) {
+            recovery_send_json(fd,400,"{\"ok\":false,\"error\":\"Request body is not allowed\"}"); goto done;
+        }
+        result=m1_uart_request_sensors();
+        if (result==0) recovery_send_json(fd,200,"{\"ok\":true,\"bytes\":12,\"tx_result\":0}");
+        else if (result==-3) recovery_send_json(fd,409,"{\"ok\":false,\"error\":\"UART command already pending\"}");
+        else if (result==-2) recovery_send_json(fd,503,"{\"ok\":false,\"error\":\"UART1 is not ready\"}");
+        else if (result==-5) recovery_send_json(fd,503,"{\"ok\":false,\"error\":\"Sensor request timed out\"}");
+        else recovery_send_json(fd,503,"{\"ok\":false,\"error\":\"Sensor request send failed\"}");
         goto done;
     }
     if (!strcmp(path,"/api/uart/config")) {
