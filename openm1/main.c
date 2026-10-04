@@ -8,6 +8,9 @@ int main(void)
     network_InitTypeDef_st wifi_config;
     mico_Context_t *context;
     char rf_version[64] = {0};
+    uint8_t mac[6] = {0};
+    char recovery_ssid[32] = RECOVERY_FALLBACK_SSID;
+    char mac_text[18] = {0};
     OSStatus result;
     unsigned long counter = 0;
     micoMemInfo_t *memory;
@@ -41,16 +44,32 @@ int main(void)
     printf("RECOVERY: micoWlanPowerOn result = %d\r\n", result);
     mico_thread_msleep(500);
 
+    /* The MOC wrapper returns void. Reject clearly invalid/uninitialized MACs. */
+    mico_wlan_get_mac_address(mac);
+    if (memcmp(mac, "\0\0\0\0\0\0", sizeof(mac)) != 0 &&
+        memcmp(mac, "\xff\xff\xff\xff\xff\xff", sizeof(mac)) != 0 &&
+        (mac[0] & 1u) == 0) {
+        snprintf(recovery_ssid, sizeof(recovery_ssid), "OpenM1-%02X%02X%02X",
+                 mac[3], mac[4], mac[5]);
+        snprintf(mac_text, sizeof(mac_text), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        printf("RECOVERY: MAC = %s\r\n", mac_text);
+    } else {
+        printf("RECOVERY: MAC read failed, using fallback SSID\r\n");
+    }
+    recovery_set_identity(recovery_ssid, mac_text);
+    printf("RECOVERY: SSID = %s\r\n", recovery_ssid);
+
     printf("RECOVERY: starting SoftAP\r\n");
     memset(&wifi_config, 0, sizeof(wifi_config));
     wifi_config.wifi_mode = Soft_AP;
-    memcpy(wifi_config.wifi_ssid, RECOVERY_SSID, sizeof(RECOVERY_SSID));
+    snprintf(wifi_config.wifi_ssid, sizeof(wifi_config.wifi_ssid), "%s", recovery_ssid);
     memcpy(wifi_config.local_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     memcpy(wifi_config.net_mask, "255.255.255.0", sizeof("255.255.255.0"));
     memcpy(wifi_config.gateway_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     memcpy(wifi_config.dnsServer_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     wifi_config.dhcpMode = DHCP_Server;
-    printf("RECOVERY: SoftAP SSID = %s\r\n", RECOVERY_SSID);
+    printf("RECOVERY: SoftAP SSID = %s\r\n", recovery_ssid);
     printf("RECOVERY: calling StartNetwork\r\n");
     result = StartNetwork(&wifi_config);
     printf("RECOVERY: StartNetwork result = %d\r\n", result);

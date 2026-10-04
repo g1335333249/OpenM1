@@ -222,8 +222,8 @@ void wifi_manager_status_json(char *out, size_t out_size)
     json_string(ssid,sizeof(ssid),snapshot.ssid);
     json_string(message,sizeof(message),snapshot.message);
     snprintf(out,out_size,
-      "{\"recovery_ap\":%s,\"sta_state\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"gateway\":\"%s\",\"netmask\":\"%s\",\"dns\":\"%s\",\"rssi\":%d,\"message\":\"%s\",\"sta_connect_supported\":true,\"scan_supported\":false}",
-      recovery_ap?"true":"false",snapshot.state,ssid,snapshot.ip,snapshot.gateway,
+      "{\"recovery_ap\":%s,\"recovery_ssid\":\"%s\",\"mac\":\"%s\",\"sta_state\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"gateway\":\"%s\",\"netmask\":\"%s\",\"dns\":\"%s\",\"rssi\":%d,\"message\":\"%s\",\"sta_connect_supported\":true,\"scan_supported\":false}",
+      recovery_ap?"true":"false",recovery_ssid(),recovery_mac(),snapshot.state,ssid,snapshot.ip,snapshot.gateway,
       snapshot.netmask,snapshot.dns,snapshot.rssi,message);
 }
 const char *wifi_manager_scan_json(void)

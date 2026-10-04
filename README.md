@@ -6,7 +6,7 @@
 
 用户已在真实 M1 上验证 v0.1.0：启动、SoftAP、DHCP、HTTP 页面、`/api/health`、`/api/info`、OTA 上传、Flash 写入、APP CRC、MD5、boot CRC16、boot table 更新、自动重启及 Bootloader 应用新 OTA 均成功。OTA_TEMP 分区起始 `0x00110000`、长度 `0xB5000`（741376 字节）；稳定时空闲堆约 99088 字节。v0.1.0 的 OTA 测试文件 515452 字节，boot CRC16 为 `e0ad`。**v0.2.0 的手动 STA 连接和新中文页面尚未实机验证；URL OTA 也尚未实机验证。** Manifest 分别记录已验证的 Recovery 基础设施和待验证的新功能。
 
-本版按恢复优先原则重新使用已在 v0.1.0 验证的固定 SSID **`OpenM1-Recovery`**。v0.1.1 的 MAC 后缀方案不用于 v0.2.0。热点开放、无密码，地址固定为 `192.168.4.1/24`，DHCP Server 开启，HTTP 监听 TCP 80。任何家庭 Wi-Fi 凭据只保存在运行时 RAM；**每次重启都会先启动恢复热点和 OTA 服务，不自动连接家庭 Wi-Fi。** 不要在不可信网络暴露此无认证管理界面。
+恢复热点名称由设备 Wi-Fi MAC 的最后 3 字节生成，格式为 **`OpenM1-XXXXXX`**，例如 MAC `34:EA:34:12:AB:CD` 对应 `OpenM1-12ABCD`。若 MAC 读取结果无效，则使用 `OpenM1-RECOVERY` 并输出故障日志。热点开放、无密码，地址固定为 `192.168.4.1/24`，DHCP Server 开启，HTTP 监听 TCP 80。任何家庭 Wi-Fi 凭据只保存在运行时 RAM；**每次重启都会先启动恢复热点和 OTA 服务，不自动连接家庭 Wi-Fi。** 不要在不可信网络暴露此无认证管理界面。
 
 ## 页面与接口
 
