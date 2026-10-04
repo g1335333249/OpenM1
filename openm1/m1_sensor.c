@@ -21,12 +21,32 @@ static void accept_frame(const uint8_t f[20])
     int fv=formaldehyde<=10.0f;
     mico_rtos_lock_mutex(&sensor_mutex);
     sensor.frame_count++;
+    sensor.sensor_frames++;
     sensor.temperature=temperature; sensor.temperature_valid=tv!=0;
     sensor.humidity=humidity; sensor.humidity_valid=hv!=0;
     sensor.pm25=(uint16_t)pm25; sensor.pm25_valid=pv!=0;
     sensor.formaldehyde=formaldehyde; sensor.formaldehyde_valid=fv!=0;
     if (tv||hv||pv||fv) sensor.last_update_ms=mico_rtos_get_time();
-    if (!tv||!hv||!pv||!fv) sensor.parser_error_count++;
+    if (!tv||!hv||!pv||!fv) {
+        sensor.parser_error_count++;
+        sensor.invalid_frames++;
+    }
+    mico_rtos_unlock_mutex(&sensor_mutex);
+}
+
+static void accept_time_frame(const uint8_t f[20])
+{
+    unsigned year=(unsigned)f[2]*256u+f[3];
+    int sane=year>=2000 && year<=2099 && f[4]>=1 && f[4]<=12 &&
+             f[5]>=1 && f[5]<=31 && f[6]<=23 && f[7]<=59 && f[8]<=59;
+    mico_rtos_lock_mutex(&sensor_mutex);
+    sensor.time_frames++;
+    if (sane)
+        snprintf(sensor.m1_datetime,sizeof(sensor.m1_datetime),
+                 "%04u-%02u-%02u %02u:%02u:%02u",year,
+                 (unsigned)f[4],(unsigned)f[5],(unsigned)f[6],
+                 (unsigned)f[7],(unsigned)f[8]);
+    else { sensor.invalid_frames++; sensor.parser_error_count++; }
     mico_rtos_unlock_mutex(&sensor_mutex);
 }
 
@@ -52,12 +72,36 @@ void m1_sensor_parse(const uint8_t *bytes, size_t length)
         frame[frame_used++]=bytes[i];
         if (frame_used==sizeof(frame)) {
             if (frame[19]=='!') {
-                if (frame[1]==1) accept_frame(frame);
+                mico_rtos_lock_mutex(&sensor_mutex);
+                sensor.total_frames++;
+                mico_rtos_unlock_mutex(&sensor_mutex);
+                switch (frame[1]) {
+                case 0x01: accept_frame(frame); break;
+                case 0x0c: accept_time_frame(frame); break;
+                case 0x0f:
+                    mico_rtos_lock_mutex(&sensor_mutex);
+                    sensor.type0f_frames++;
+                    sensor.type0f_last_value=frame[2];
+                    sensor.type0f_last_rx_ms=mico_rtos_get_time();
+                    mico_rtos_unlock_mutex(&sensor_mutex);
+                    break;
+                case 0x18:
+                    mico_rtos_lock_mutex(&sensor_mutex);
+                    sensor.type18_frames++;
+                    mico_rtos_unlock_mutex(&sensor_mutex);
+                    break;
+                default:
+                    mico_rtos_lock_mutex(&sensor_mutex);
+                    sensor.unknown_frames++;
+                    mico_rtos_unlock_mutex(&sensor_mutex);
+                    break;
+                }
                 frame_used=0;
             } else {
                 unsigned j;
                 mico_rtos_lock_mutex(&sensor_mutex);
                 sensor.parser_error_count++;
+                sensor.invalid_frames++;
                 mico_rtos_unlock_mutex(&sensor_mutex);
                 /* Preserve a possible later start marker in a damaged packet. */
                 for (j=1;j<sizeof(frame) && frame[j]!='#';j++) {}

@@ -146,9 +146,11 @@ void m1_uart_worker(mico_thread_arg_t arg)
             m1_sensor_snapshot_t snapshot;
             m1_sensor_get_snapshot(&snapshot);
             mico_rtos_lock_mutex(&uart_mutex);
-            printf("SENSOR: UART rx=%lu frames=%lu errors=%lu\r\n",
-                   (unsigned long)rx_bytes,(unsigned long)snapshot.frame_count,
-                   (unsigned long)snapshot.parser_error_count);
+            printf("SENSOR: UART rx=%lu total=%lu sensor=%lu time=%lu type0f=%lu type18=%lu invalid=%lu\r\n",
+                   (unsigned long)rx_bytes,(unsigned long)snapshot.total_frames,
+                   (unsigned long)snapshot.sensor_frames,(unsigned long)snapshot.time_frames,
+                   (unsigned long)snapshot.type0f_frames,(unsigned long)snapshot.type18_frames,
+                   (unsigned long)snapshot.invalid_frames);
             mico_rtos_unlock_mutex(&uart_mutex);
             last_log=now;
         }
@@ -223,12 +225,20 @@ void m1_uart_status_json(char *out, size_t capacity)
     } else { baud=0;bytes=0;last=0;online=0;tx_count=0;tx_frame_count=0;last_tx=0;sent=0;tx_result=0; }
     snprintf(out,capacity,
              "{\"uart\":\"MICO_UART_1\",\"tx\":\"GPIO9\",\"rx\":\"GPIO10\",\"baud\":%lu,"
-             "\"online\":%s,\"rx_bytes\":%lu,\"valid_frames\":%lu,\"invalid_frames\":%lu,"
+             "\"online\":%s,\"rx_bytes\":%lu,\"total_frames\":%lu,\"sensor_frames\":%lu,"
+             "\"time_frames\":%lu,\"type0f_frames\":%lu,\"type18_frames\":%lu,"
+             "\"unknown_frames\":%lu,\"invalid_frames\":%lu,\"m1_datetime\":\"%s\","
+             "\"type0f_last_value\":%u,\"type0f_last_rx_ms\":%lu,"
              "\"last_rx_ms\":%lu,\"last_rx_age_ms\":%lu,\"tx_bytes\":%lu,\"tx_frames\":%lu,"
              "\"last_tx_ms\":%lu,\"last_tx_age_ms\":%lu,\"init_command_sent\":%s,\"init_command_result\":%d,"
              "\"parser\":\"zm1-type1-partial\",\"protocol_verified\":false,\"passive_rx_only\":false,\"fixed_init_command_only\":true}",
              (unsigned long)baud,online?"true":"false",(unsigned long)bytes,
-             (unsigned long)s.frame_count,(unsigned long)s.parser_error_count,(unsigned long)last,
+             (unsigned long)s.total_frames,(unsigned long)s.sensor_frames,
+             (unsigned long)s.time_frames,(unsigned long)s.type0f_frames,
+             (unsigned long)s.type18_frames,(unsigned long)s.unknown_frames,
+             (unsigned long)s.invalid_frames,s.m1_datetime,
+             (unsigned)s.type0f_last_value,(unsigned long)s.type0f_last_rx_ms,
+             (unsigned long)last,
              (unsigned long)(last?mico_rtos_get_time()-last:0),
              (unsigned long)tx_count,(unsigned long)tx_frame_count,(unsigned long)last_tx,
              (unsigned long)(last_tx?mico_rtos_get_time()-last_tx:0),

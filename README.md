@@ -51,6 +51,8 @@ SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结�
 
 **协议状态为 PARTIAL。** 参考 APP 对类型 `0x01` 仅检查固定长度、首尾和字段，未发现明确的 checksum/CRC 比对；OpenM1 增加取值范围筛查，但不会把结构有效帧称为“校验和通过”。所有数值在首次完整类型 `0x01` 帧出现前为 `null`，页面显示 `--`。v0.3.0 实机持续观察到 UART1 `rx_bytes=0`；zM1 参考 APP 在 UART 初始化后发送过一次固定 12 字节帧。因此 v0.3.1 在 UART1 初始化成功后等待 400 ms，发送 **`23 02 64 01 00 00 00 00 00 00 00 21`** 一次；网页切换波特率并重新初始化后也发送一次。`POST /api/uart/init` 可手工重发同一帧。其业务含义尚未确认，**没有任意 HEX 发送接口，也不周期 polling**。
 
+新的实机 RX 已确认 type `0x0C` 日期时间帧和 type `0x0F` 帧。[定点逆向报告](docs/zm1-uart-type0f.md)表明 `0x0F` 进入亮度处理路径，`0x18` 可触发确认及重置路径；OpenM1 仅增加接收统计和诊断显示，不新增 UART 发送。`/api/uart/status` 将总帧、传感器帧、时间帧、`0x0F`、`0x18`、未知帧、无效帧分别计数；M1 时间只显示，不写设备 RTC。
+
 实机测试时先观察 `SENSOR: init command result`、`tx_frames` 和 `rx_bytes`，再把网页温度、湿度、PM2.5、甲醛与 M1 正面屏幕逐项对比。若仍收不到任何数据，请提供 `/api/uart/status`、`/api/uart/raw`、测试持续时间和串口日志；不要自行向 ATSAMD20 发送其他命令。屏幕 Wi-Fi 图标仍未找到可信控制协议，见 [逆向记录](docs/zm1-wifi-icon-reverse.md)，本版不发送新的 UART/GPIO 控制动作。
 
 ## MQTT 与 Home Assistant
