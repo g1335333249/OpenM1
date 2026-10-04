@@ -1,4 +1,5 @@
 #include "recovery.h"
+#include "wifi_manager.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,8 +19,9 @@ int recovery_send_all(int fd, const void *data, size_t len)
 void recovery_send_text(int fd, int code, const char *type, const char *body, size_t length)
 {
     char header[192];
-    const char *reason=code==200?"OK":code==400?"Bad Request":code==404?"Not Found":
-                       code==405?"Method Not Allowed":code==409?"Conflict":code==413?"Payload Too Large":"Error";
+    const char *reason=code==200?"OK":code==202?"Accepted":code==400?"Bad Request":code==404?"Not Found":
+                       code==405?"Method Not Allowed":code==409?"Conflict":code==413?"Payload Too Large":
+                       code==503?"Service Unavailable":"Error";
     int n=snprintf(header,sizeof(header),"HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %lu\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n",
                    code,reason,type,(unsigned long)length);
     if (n>0 && n<(int)sizeof(header)) {
@@ -80,9 +82,62 @@ static int extract_url(const char *body, size_t len, char *url, size_t max)
     }
     return 0;
 }
+static void skip_json_space(const char **p, const char *end)
+{
+    while (*p<end && (**p==' ' || **p=='\t' || **p=='\r' || **p=='\n')) ++*p;
+}
+static int read_json_string(const char **p, const char *end, char *out, size_t capacity)
+{
+    size_t used=0;
+    if (*p>=end || *(*p)++!='"') return 0;
+    while (*p<end && **p!='"') {
+        unsigned char c=(unsigned char)*(*p)++;
+        if (c=='\\') {
+            if (*p>=end) return 0;
+            c=(unsigned char)*(*p)++;
+            if (c!='"' && c!='\\' && c!='/') return 0;
+        }
+        if (c<32 || used+1>=capacity) return 0;
+        out[used++]=(char)c;
+    }
+    if (*p>=end) return 0;
+    ++*p;
+    out[used]=0;
+    return 1;
+}
+static int parse_wifi_connect(const char *body, size_t length, char ssid[32], char password[64])
+{
+    const char *p=body,*end=body+length;
+    int got_ssid=0,got_password=0;
+    char key[16];
+    ssid[0]=0; password[0]=0;
+    skip_json_space(&p,end);
+    if (p>=end || *p++!='{') return 0;
+    for (;;) {
+        skip_json_space(&p,end);
+        if (p<end && *p=='}') { p++; break; }
+        if (!read_json_string(&p,end,key,sizeof(key))) return 0;
+        skip_json_space(&p,end);
+        if (p>=end || *p++!=':') return 0;
+        skip_json_space(&p,end);
+        if (!strcmp(key,"ssid") && !got_ssid) {
+            if (!read_json_string(&p,end,ssid,32)) return 0;
+            got_ssid=1;
+        } else if (!strcmp(key,"password") && !got_password) {
+            if (!read_json_string(&p,end,password,64)) return 0;
+            got_password=1;
+        } else return 0;
+        skip_json_space(&p,end);
+        if (p<end && *p==',') { p++; continue; }
+        if (p<end && *p=='}') { p++; break; }
+        return 0;
+    }
+    skip_json_space(&p,end);
+    return p==end && got_ssid && got_password;
+}
 static void handle_client(int fd)
 {
-    char request[2049], json[512], method[8], path[80], url[512];
+    char request[2049], json[768], method[8], path[80], url[512];
     size_t used=0,body_len=0; uint32_t length=0;
     int n,seen=0,body_start=-1;
     int timeout_ms=5000;
@@ -107,10 +162,14 @@ static void handle_client(int fd)
         else if (!strcmp(path,"/api/health")) recovery_send_json(fd,200,"{\"status\":\"ok\",\"recovery\":true}");
         else if (!strcmp(path,"/api/ota/status")) {
             recovery_ota_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/wifi/status")) {
+            wifi_manager_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/wifi/scan")) {
+            recovery_send_json(fd,200,wifi_manager_scan_json());
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"Phicomm M1\",\"firmware\":\"OpenM1 Recovery v0.1.1\",\"version\":\"0.1.1\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"Recovery SoftAP\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
-                     recovery_rf(),recovery_ssid(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.2.0\",\"version\":\"0.2.0\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+                     recovery_rf(),RECOVERY_SSID,RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else recovery_send_json(fd,404,"{\"message\":\"Not found\"}");
         goto done;
@@ -119,6 +178,38 @@ static void handle_client(int fd)
     if (!strcmp(path,"/api/reboot")) {
         recovery_send_json(fd,200,"{\"ok\":true,\"message\":\"Rebooting\"}");
         close(fd); mico_thread_msleep(1800); MicoSystemReboot(); return;
+    }
+    if (!strcmp(path,"/api/wifi/connect")) {
+        char body[257],ssid[32],password[64];
+        int result;
+        if (!seen || !length || length>256 || body_len>length) {
+            recovery_send_json(fd,400,"{\"message\":\"Wi-Fi 请求长度无效。\"}"); goto done;
+        }
+        memcpy(body,request+body_start,body_len);
+        while (body_len<length) {
+            n=recv(fd,body+body_len,length-body_len,0);
+            if (n<=0) { recovery_send_json(fd,400,"{\"message\":\"Wi-Fi 请求中断。\"}"); goto done; }
+            body_len+=(size_t)n;
+        }
+        body[length]=0;
+        if (!parse_wifi_connect(body,length,ssid,password)) {
+            recovery_send_json(fd,400,"{\"message\":\"Wi-Fi 名称或密码格式无效。\"}"); goto done;
+        }
+        result=wifi_manager_connect(ssid,password);
+        memset(password,0,sizeof(password));
+        memset(body,0,sizeof(body));
+        if (result==-2) recovery_send_json(fd,409,"{\"message\":\"已有 Wi-Fi 连接正在进行。\"}");
+        else if (result==-4) recovery_send_json(fd,409,"{\"message\":\"请先断开当前家庭 Wi-Fi。\"}");
+        else if (result==-1) recovery_send_json(fd,400,"{\"message\":\"Wi-Fi 名称或密码长度无效。\"}");
+        else if (result!=0) recovery_send_json(fd,503,"{\"message\":\"Wi-Fi 管理器暂不可用。\"}");
+        else recovery_send_json(fd,202,"{\"ok\":true,\"message\":\"正在连接家庭 Wi-Fi。\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/wifi/disconnect")) {
+        if (wifi_manager_disconnect()==0)
+            recovery_send_json(fd,200,"{\"ok\":true,\"message\":\"已断开家庭 Wi-Fi，恢复热点仍保持开启。\"}");
+        else recovery_send_json(fd,503,"{\"message\":\"断开家庭 Wi-Fi 失败。\"}");
+        goto done;
     }
     if (!strcmp(path,"/api/ota/upload") || !strcmp(path,"/api/ota/url")) {
         int is_url=!strcmp(path,"/api/ota/url");
@@ -138,7 +229,7 @@ static void handle_client(int fd)
                 recovery_send_json(fd,400,"{\"message\":\"Invalid URL JSON\"}"); goto done;
             }
             if (!strncmp(url,"https://",8)) {
-                recovery_send_json(fd,400,"{\"message\":\"HTTPS is not supported in Recovery v0.1.1\"}"); goto done;
+                recovery_send_json(fd,400,"{\"message\":\"暂不支持 HTTPS。\"}"); goto done;
             }
             if (strncmp(url,"http://",7)) { recovery_send_json(fd,400,"{\"message\":\"HTTP URL required\"}"); goto done; }
             if (!recovery_ota_begin(fd,1,0,(uint8_t*)url,strlen(url))) {

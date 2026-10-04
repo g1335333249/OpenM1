@@ -1,20 +1,20 @@
 #include "mico.h"
 #include "mico_wlan.h"
 #include "recovery.h"
+#include "wifi_manager.h"
 
 int main(void)
 {
     network_InitTypeDef_st wifi_config;
     mico_Context_t *context;
     char rf_version[64] = {0};
-    uint8_t mac[6] = {0};
     OSStatus result;
     unsigned long counter = 0;
     micoMemInfo_t *memory;
 
     printf("================================\r\n"
-           "OpenM1 Recovery\r\n"
-           "Version: 0.1.1\r\n"
+           "OpenM1\r\n"
+           "Version: 0.2.0\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -41,21 +41,16 @@ int main(void)
     printf("RECOVERY: micoWlanPowerOn result = %d\r\n", result);
     mico_thread_msleep(500);
 
-    mico_wlan_get_mac_address(mac);
-    recovery_set_mac(mac);
-    printf("RECOVERY: SoftAP SSID = %s\r\n", recovery_ssid());
-    if ((mac[0] | mac[1] | mac[2] | mac[3] | mac[4] | mac[5]) == 0)
-        printf("RECOVERY: WARNING: Wi-Fi MAC is all zero\r\n");
-
     printf("RECOVERY: starting SoftAP\r\n");
     memset(&wifi_config, 0, sizeof(wifi_config));
     wifi_config.wifi_mode = Soft_AP;
-    memcpy(wifi_config.wifi_ssid, recovery_ssid(), strlen(recovery_ssid()) + 1);
+    memcpy(wifi_config.wifi_ssid, RECOVERY_SSID, sizeof(RECOVERY_SSID));
     memcpy(wifi_config.local_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     memcpy(wifi_config.net_mask, "255.255.255.0", sizeof("255.255.255.0"));
     memcpy(wifi_config.gateway_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     memcpy(wifi_config.dnsServer_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     wifi_config.dhcpMode = DHCP_Server;
+    printf("RECOVERY: SoftAP SSID = %s\r\n", RECOVERY_SSID);
     printf("RECOVERY: calling StartNetwork\r\n");
     result = StartNetwork(&wifi_config);
     printf("RECOVERY: StartNetwork result = %d\r\n", result);
@@ -66,6 +61,8 @@ int main(void)
         recovery_ota_partition_log();
         if (recovery_http_start() != kNoErr)
             printf("RECOVERY: HTTP server failed to start\r\n");
+        else if (wifi_manager_init() != kNoErr)
+            printf("WIFI: manager initialization failed\r\n");
     }
     for (;;) {
         mico_thread_msleep(10000);

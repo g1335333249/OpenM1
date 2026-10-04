@@ -22,7 +22,6 @@ static mico_thread_t ota_thread;
 static mico_mutex_t status_mutex;
 static int mutex_ready;
 static char rf_text[64] = "unavailable";
-static char ssid_text[32] = RECOVERY_SSID_PREFIX;
 static struct {
     const char *state;
     uint32_t received;
@@ -41,12 +40,6 @@ void recovery_set_rf(const char *version)
     }
 }
 const char *recovery_rf(void) { return rf_text; }
-void recovery_set_mac(const uint8_t mac[6])
-{
-    snprintf(ssid_text, sizeof(ssid_text), RECOVERY_SSID_PREFIX "-%02X%02X%02X",
-             mac[3], mac[4], mac[5]);
-}
-const char *recovery_ssid(void) { return ssid_text; }
 static void lock_status(void) { if (mutex_ready) mico_rtos_lock_mutex(&status_mutex); }
 static void unlock_status(void) { if (mutex_ready) mico_rtos_unlock_mutex(&status_mutex); }
 static void set_status(const char *state, const char *message, uint32_t received, uint32_t total)
@@ -155,7 +148,7 @@ int recovery_ota_verify_flash(uint32_t total, uint16_t *boot_crc)
     uint8_t header[8], embedded_md5[16], calculated_md5[16];
     uint32_t payload_len, at, left, count;
     uint16_t app_expected, app_crc=0, boot_result;
-    uint8_t version_window[13]; size_t version_used=0, i;
+    uint8_t version_window[12]; size_t version_used=0, i;
     md5_context md5;
     CRC16_Context crc;
     if (total<=APP_START+MD5_SIZE || total>RECOVERY_MAX_OTA_SIZE) { fail("Invalid OTA length"); return 0; }
@@ -188,12 +181,12 @@ int recovery_ota_verify_flash(uint32_t total, uint16_t *boot_crc)
         CRC16_Update(&crc,io_buffer,count);
         if (at<APP_OFFSET) for (i=0;i<count && at+i<APP_OFFSET;i++) {
             if (version_used<sizeof(version_window)) version_window[version_used++]=io_buffer[i];
-            else { memmove(version_window,version_window+1,sizeof(version_window)-1); version_window[12]=io_buffer[i]; }
-            if (version_used==sizeof(version_window) && !memcmp(version_window,"3080B002.",10) &&
+            else { memmove(version_window,version_window+1,sizeof(version_window)-1); version_window[11]=io_buffer[i]; }
+            if (version_used==sizeof(version_window) && !memcmp(version_window,"3080B002.",9) &&
+                version_window[9]>='0' && version_window[9]<='9' &&
                 version_window[10]>='0' && version_window[10]<='9' &&
-                version_window[11]>='0' && version_window[11]<='9' &&
-                version_window[12]>='0' && version_window[12]<='9') {
-                memcpy(detected_kernel,version_window,13); detected_kernel[13]=0;
+                version_window[11]>='0' && version_window[11]<='9') {
+                memcpy(detected_kernel,version_window,12); detected_kernel[12]=0;
             }
         }
         at+=count; left-=count;
@@ -231,7 +224,7 @@ static int url_download(const char *url)
     struct sockaddr_in address; int remote=-1,n,header_len=0,body_at=-1,code=0;
     unsigned long length=0; char *line,*next;
     int parsed=parse_url(url,host,sizeof(host),&port,&path);
-    if (parsed==-2) { fail("HTTPS is not supported in Recovery v0.1.1"); return 0; }
+    if (parsed==-2) { fail("此版本暂不支持 HTTPS"); return 0; }
     if (parsed) { fail("Invalid HTTP URL"); return 0; }
     resolved=gethostbyname(host);
     if (!resolved || !resolved->h_addr) { fail("DNS lookup failed"); return 0; }

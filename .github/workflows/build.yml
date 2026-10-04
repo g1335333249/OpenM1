@@ -1,4 +1,4 @@
-name: Build OpenM1 Recovery
+name: Build OpenM1 v0.2.0
 on:
   workflow_dispatch:
   push:
@@ -23,11 +23,11 @@ jobs:
           sudo apt-get install -y make perl curl python3 python3-lib2to3 python-is-python3 dash libncurses5 lib32gcc-s1 libc6-i386
       - name: Setup GCC 5.4.1
         run: bash scripts/bootstrap_build_env.sh
-      - name: Build and verify Recovery
+      - name: Build and verify OpenM1
         run: bash scripts/build_recovery.sh
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OpenM1-Recovery-v0.1.1
+          name: OpenM1-v0.2.0
           path: dist/
           if-no-files-found: error
