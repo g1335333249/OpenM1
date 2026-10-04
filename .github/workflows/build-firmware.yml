@@ -56,13 +56,16 @@ jobs:
           python3 - <<'PY'
           import json, os
           from pathlib import Path
+          if os.getenv('GITHUB_REF_TYPE') != 'tag':
+              raise SystemExit(0)
           m = json.loads(Path('dist/manifest.json').read_text())
           tag = os.getenv('GITHUB_REF_NAME', 'v0.0.1')
           name = 'OpenM1-v0.0.1@MK3080B@moc.ota.bin'
           url = f'https://github.com/{os.environ["GITHUB_REPOSITORY"]}/releases/download/{tag}/{name}'
           Path('dist/latest.json').write_text(json.dumps({'name':'OpenM1','version':m['version'],'url':url,'sha256':m['sha256'],'size':m['size']}, indent=2)+'\n')
           PY
-          cd dist && sha256sum OpenM1-v0.0.1* manifest.json latest.json kernel_compare.txt build.log > SHA256SUMS.txt
+          cd dist && sha256sum OpenM1-v0.0.1* manifest.json kernel_compare.txt build.log > SHA256SUMS.txt
+          if test -f latest.json; then sha256sum latest.json >> SHA256SUMS.txt; fi
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
