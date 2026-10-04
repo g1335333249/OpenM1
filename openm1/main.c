@@ -3,6 +3,8 @@
 #include "recovery.h"
 #include "wifi_manager.h"
 #include "m1_uart.h"
+#include "config_store.h"
+#include "mqtt_manager.h"
 
 int main(void)
 {
@@ -18,13 +20,13 @@ int main(void)
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.3.1\r\n"
+           "Version: 0.4.0\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
     printf("RECOVERY: main entered\r\n");
     printf("RECOVERY: system context init\r\n");
-    context = mico_system_context_init(0);
+    context = mico_system_context_init(sizeof(openm1_config_t));
     if (context == NULL) {
         printf("RECOVERY: system context failed\r\n");
         return -1;
@@ -88,6 +90,10 @@ int main(void)
             while (!recovery_http_ready()) mico_thread_msleep(100);
             if (m1_uart_init() != kNoErr)
                 printf("SENSOR: UART diagnostic initialization failed; Recovery remains active\r\n");
+            if (config_store_init()!=kNoErr)
+                printf("CONFIG: MQTT persistence unavailable; Recovery remains active\r\n");
+            else if (mqtt_manager_init()!=kNoErr)
+                printf("MQTT: manager initialization failed; Recovery remains active\r\n");
         }
     }
     for (;;) {

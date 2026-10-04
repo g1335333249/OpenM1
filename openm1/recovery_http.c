@@ -2,6 +2,8 @@
 #include "wifi_manager.h"
 #include "m1_uart.h"
 #include "m1_sensor.h"
+#include "mqtt_manager.h"
+#include "json_min.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -139,9 +141,27 @@ static int parse_wifi_connect(const char *body, size_t length, char ssid[32], ch
     skip_json_space(&p,end);
     return p==end && got_ssid && got_password;
 }
+static int read_small_body(int fd,const char *request,int start,size_t initial,
+                           uint32_t length,char *out,size_t capacity)
+{
+    size_t got=initial;
+    int n;
+    if (!length || length>=capacity || initial>length) return 0;
+    memcpy(out,request+start,got);
+    while (got<length) {
+        n=recv(fd,out+got,length-got,0);
+        if (n<=0) return 0;
+        got+=(size_t)n;
+    }
+    out[length]=0;
+    return 1;
+}
 static void handle_client(int fd)
 {
-    char request[2049], json[768], method[8], path[80], url[512];
+    /* This server processes one client at a time. Keep the large HTTP buffers
+     * out of its 6 KiB thread stack, including during nested config writes. */
+    static char request[2049], json[1280], url[512];
+    char method[8], path[80];
     size_t used=0,body_len=0; uint32_t length=0;
     int n,seen=0,body_start=-1;
     int timeout_ms=5000;
@@ -170,9 +190,13 @@ static void handle_client(int fd)
             wifi_manager_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/wifi/scan")) {
             recovery_send_json(fd,200,wifi_manager_scan_json());
+        } else if (!strcmp(path,"/api/mqtt/status")) {
+            mqtt_manager_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/homeassistant/status")) {
+            homeassistant_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.3.1\",\"version\":\"0.3.1\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.4.0\",\"version\":\"0.4.0\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -185,6 +209,56 @@ static void handle_client(int fd)
         goto done;
     }
     if (strcmp(method,"POST")) { recovery_send_json(fd,405,"{\"message\":\"Method not allowed\"}"); goto done; }
+    if (!strcmp(path,"/api/wifi/scan")) {
+        int result=wifi_manager_start_scan();
+        if (!result) recovery_send_json(fd,202,"{\"ok\":true,\"state\":\"scanning\"}");
+        else if (result==-1 || result==-3) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"扫描正在进行或固件升级中。\"}");
+        else recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"扫描回调尚未就绪。\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/mqtt/config")) {
+        static char body[1025];
+        int result;
+        if (!seen || !read_small_body(fd,request,body_start,body_len,length,body,sizeof(body))) {
+            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"MQTT 配置请求无效。\"}");goto done;
+        }
+        result=mqtt_manager_configure(body,length);
+        memset(body,0,sizeof(body));
+        if (result==0) recovery_send_json(fd,200,"{\"ok\":true,\"message\":\"MQTT 配置已保存。\"}");
+        else if (result==-2) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"请先关闭 Home Assistant 自动发现，再修改主题或发现前缀。\"}");
+        else if (result==-3) recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"配置保存失败或正在升级固件。\"}");
+        else recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"MQTT 配置字段或长度无效。\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/mqtt/start") || !strcmp(path,"/api/mqtt/test")) {
+        int result=mqtt_manager_start();
+        if (!result) recovery_send_json(fd,202,"{\"ok\":true,\"message\":\"MQTT 服务正在启动。\"}");
+        else if (result==-2) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"请先配置 MQTT 服务器。\"}");
+        else recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"MQTT 服务暂不可用。\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/mqtt/stop")) {
+        if (!mqtt_manager_stop()) recovery_send_json(fd,200,"{\"ok\":true,\"message\":\"MQTT 服务正在停止。\"}");
+        else recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"MQTT 服务暂不可用。\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/homeassistant/discovery")) {
+        char body[65];
+        json_min_field_t field[1];
+        int parsed,result;
+        if (!seen || !read_small_body(fd,request,body_start,body_len,length,body,sizeof(body))) {
+            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"自动发现请求无效。\"}");goto done;
+        }
+        parsed=json_min_parse(body,length,field,1);
+        if (parsed!=1 || strcmp(field[0].key,"enabled") || field[0].kind!='b') {
+            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"自动发现请求无效。\"}");goto done;
+        }
+        result=mqtt_manager_set_discovery(!strcmp(field[0].value,"true"));
+        if (!result) recovery_send_json(fd,202,"{\"ok\":true,\"message\":\"自动发现请求已提交。\"}");
+        else if (result==-2) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"请先配置并启动 MQTT 服务。\"}");
+        else recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"自动发现暂不可用。\"}");
+        goto done;
+    }
     if (!strcmp(path,"/api/reboot")) {
         recovery_send_json(fd,200,"{\"ok\":true,\"message\":\"Rebooting\"}");
         close(fd); mico_thread_msleep(1800); MicoSystemReboot(); return;
