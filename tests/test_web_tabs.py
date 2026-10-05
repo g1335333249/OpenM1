@@ -52,8 +52,11 @@ assert 'mqttFormInitialized' in source and 'haFormInitialized' in source
 assert "if($('mqtt-password').value)c.password=" in source
 for route in ('/api/wifi/scan', '/api/mqtt/status', '/api/homeassistant/status',
               '/api/ota/upload', '/api/ota/url', '/api/uart/init', '/api/uart/raw',
-              '/api/display/status', '/api/display/brightness', '/api/network/health'):
+              '/api/display/status', '/api/display/brightness',
+              '/api/display/network-test', '/api/network/health'):
     assert route in source, route
+for mode in ('blink', 'online', 'no_internet', 'auto'):
+    assert f'data-network-test="{mode}"' in source, mode
 for label in ('实时环境数据', '温度', '湿度', 'PM2.5', '甲醛', '亮度事件帧'):
     assert label in source, label
 assert "$('display-brightness').addEventListener('input',showBrightnessLabel)" in source

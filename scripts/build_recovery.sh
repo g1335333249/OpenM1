@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.5.0
+PREFIX=OpenM1-v0.5.1
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 TOOL=.micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/Linux64/bin
 [[ "$(git -C mico-os rev-parse HEAD)" == "$SDK_COMMIT" ]]
@@ -12,8 +12,10 @@ python3 tools/embed_page.py --check
 python3 tests/test_web_tabs.py
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_sensor.c openm1/m1_sensor.c -o /tmp/openm1-sensor-test
 /tmp/openm1-sensor-test
-cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_display.c openm1/m1_display.c -o /tmp/openm1-display-test
+cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_display.c openm1/m1_display.c openm1/m1_display_network.c -o /tmp/openm1-display-test
 /tmp/openm1-display-test
+cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_display_network.c openm1/m1_display_network.c -o /tmp/openm1-display-network-test
+/tmp/openm1-display-network-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_network_health.c openm1/network_health_state.c -o /tmp/openm1-network-health-test
 /tmp/openm1-network-health-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_config_migration.c openm1/config_store.c -o /tmp/openm1-config-migration-test
@@ -49,7 +51,7 @@ for symbol in recovery_http_server_thread recovery_ota_upload_handler recovery_o
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
-for symbol in m1_uart_init m1_uart_worker m1_uart_send_init_command m1_uart_request_sensors zm1_sensor_request m1_sensor_parse m1_sensor_get_snapshot m1_display_init m1_display_set_brightness m1_display_handle_brightness_event network_health_init network_health_step; do
+for symbol in m1_uart_init m1_uart_worker m1_uart_send_init_command m1_uart_request_sensors zm1_sensor_request m1_sensor_parse m1_sensor_get_snapshot m1_display_init m1_display_set_brightness m1_display_handle_brightness_event m1_display_set_network_state m1_display_network_test network_blink_timer_handler network_health_init network_health_step; do
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
@@ -60,7 +62,7 @@ done
 grep -Fq 'mico_notify_WIFI_SCAN_ADV_COMPLETED' openm1/wifi_manager.c
 grep -Fq 'micoWlanStartScanAdv()' openm1/wifi_manager.c
 echo '[PASS] SDK advanced scan callback and API'
-for route in /api/wifi/status /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/sensors /api/uart/status /api/uart/raw /api/uart/config /api/uart/init /api/uart/sensor-request /api/display/status /api/display/brightness /api/network/health /api/ota/status /api/ota/upload /api/ota/url /api/reboot /api/mqtt/status /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
+for route in /api/wifi/status /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/sensors /api/uart/status /api/uart/raw /api/uart/config /api/uart/init /api/uart/sensor-request /api/display/status /api/display/brightness /api/display/network-test /api/network/health /api/ota/status /api/ota/upload /api/ota/url /api/reboot /api/mqtt/status /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
   if ! "$TOOL/arm-none-eabi-strings" "dist/$PREFIX.elf" | grep -F "$route" >/dev/null; then echo "[FAIL] missing route $route"; exit 1; fi
   echo "[PASS] $route"
 done
@@ -68,6 +70,7 @@ grep -Eq '^#define MICO_STDIO_UART[[:space:]]+MICO_UART_2' mico-os/board/MK3080B
 grep -Eq '^#define MICO_UART_FOR_APP[[:space:]]+MICO_UART_1' mico-os/board/MK3080B/mico_board.h
 echo '[PASS] STDIO UART2 and app UART1 unchanged'
 python3 tools/check_uart_init_command.py
+python3 tools/check_display_pwm.py
 if grep -En 'MICO_STDIO_UART|/api/uart/send' openm1/m1_uart.c openm1/m1_sensor.c openm1/recovery_http.c; then
   echo '[FAIL] sensor bridge must leave STDIO UART alone and forbid arbitrary TX'; exit 1
 fi
@@ -99,7 +102,7 @@ echo 'SOFTAP_VERIFIED=YES'
 echo 'HTTP_AND_UPLOAD_OTA_VERIFIED_ON_V0_1_0_HARDWARE=YES'
 echo 'STA_VERIFIED_ON_HARDWARE=YES (v0.2.0)'
 echo 'WIFI_SCAN_FEATURE_PRESENT=YES; HARDWARE_VERIFIED=NO'
-echo 'WIFI_ICON_PROTOCOL_VERIFIED=NO; NO NEW UART TX'
+echo 'WIFI_ICON_PWM_PROTOCOL_REVERSE_VERIFIED=YES; HARDWARE_VERIFIED=NO; NO NEW UART TX'
 echo 'MQTT_AND_HOMEASSISTANT_FEATURE_PRESENT=YES; HARDWARE_VERIFIED=NO'
 echo 'SENSOR_UART_VERIFIED_ON_HARDWARE=YES (type 0x0C and 0x0F received)'
 echo 'SENSOR_PROTOCOL_STATUS=PARTIAL'

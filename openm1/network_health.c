@@ -70,6 +70,7 @@ static void health_worker(mico_thread_arg_t arg)
     network_health_state_t old,next;
     (void)arg;
     for (;;) {
+        m1_display_network_test_tick();
         connected=wifi_manager_station_ready();
         mico_rtos_lock_mutex(&health_mutex);
         old=health.state;
@@ -106,6 +107,7 @@ OSStatus network_health_init(void)
     if (err!=kNoErr) return err;
     health.state=NETWORK_NO_WIFI;
     health_ready=1;
+    apply_state(NETWORK_NO_WIFI);
     err=mico_rtos_create_thread(&health_thread,MICO_APPLICATION_PRIORITY,"openm1_net_health",
                                 health_worker,NETWORK_HEALTH_WORKER_STACK,0);
     if (err!=kNoErr) health_ready=0;
@@ -140,7 +142,8 @@ void network_health_status_json(char *out,size_t capacity)
     snprintf(out,capacity,
              "{\"wifi_link\":%s,\"has_ip\":%s,\"internet\":%s,\"state\":\"%s\","
              "\"probe_failures\":%u,\"last_probe_ms\":%lu,\"display_target\":\"%s\","
-             "\"red_x_target\":%s,\"display_protocol_verified\":false}",
+             "\"red_x_target\":%s,\"display_protocol\":\"pwm\","
+             "\"display_protocol_reverse_verified\":true,\"display_hardware_verified\":false}",
              link?"true":"false",ip[0]?"true":"false",
              snapshot.state==NETWORK_ONLINE?"true":"false",state_name(snapshot.state),
              (unsigned)snapshot.consecutive_failures,(unsigned long)snapshot.last_probe_ms,

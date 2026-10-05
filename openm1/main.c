@@ -22,7 +22,7 @@ int main(void)
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.5.0\r\n"
+           "Version: 0.5.1\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");

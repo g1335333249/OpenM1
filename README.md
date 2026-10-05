@@ -1,10 +1,10 @@
-# OpenM1 v0.5.0
+# OpenM1 v0.5.1
 
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
 ## 实机验证状态
 
-用户已在真实 M1 上验证 Recovery SoftAP、动态 SSID、`192.168.4.1`、中文 Web 页面、AP+STA 家庭 Wi-Fi 连接、网页 OTA、Bootloader 应用升级及升级后自动恢复。UART1 的 `0x01` 传感器请求和四项解析数值已经与实体屏幕核对；`0x0C` 时间帧和 `0x0F` 亮度事件也已收到。OTA_TEMP 分区起始 `0x00110000`、长度 `0xB5000`（741376 字节）。**v0.5.0 的自动采样、亮度控制和 Internet 探测仍需实机验证；URL OTA、扫描、MQTT 和 Home Assistant 也尚未实机核对。**
+用户已在真实 M1 上验证 Recovery SoftAP、动态 SSID、`192.168.4.1`、中文 Web 页面、AP+STA 家庭 Wi-Fi 连接、网页 OTA、Bootloader 应用升级及升级后自动恢复。UART1 的 `0x01` 传感器请求和四项解析数值已经与实体屏幕核对；`0x0C` 时间帧和 `0x0F` 亮度事件也已收到。OTA_TEMP 分区起始 `0x00110000`、长度 `0xB5000`（741376 字节）。**v0.5.1 的自动采样、亮度控制和 Internet 探测仍需实机验证；URL OTA、扫描、MQTT 和 Home Assistant 也尚未实机核对。**
 
 恢复热点名称由设备 Wi-Fi MAC 的最后 3 字节生成，格式为 **`OpenM1-XXXXXX`**，例如 MAC `34:EA:34:12:AB:CD` 对应 `OpenM1-12ABCD`。若 MAC 读取结果无效，则使用 `OpenM1-RECOVERY` 并输出故障日志。热点开放、无密码，地址固定为 `192.168.4.1/24`，DHCP Server 开启，HTTP 监听 TCP 80。任何家庭 Wi-Fi 凭据只保存在运行时 RAM；**每次重启都会先启动恢复热点和 OTA 服务，不自动连接家庭 Wi-Fi。** 不要在不可信网络暴露此无认证管理界面。
 
@@ -39,6 +39,7 @@
 | `POST /api/uart/sensor-request` | 无请求体；仅发送一次参考 zM1 固件中确认的固定 12 字节传感器请求帧 |
 | `GET /api/display/status`、`POST /api/display/brightness` | 查看亮度及提交 `{"brightness":0..4}`；0 关闭屏幕，恢复时保留原档位 |
 | `GET /api/network/health` | 独立于 MQTT 的 Station/IP/公共 TCP 探测与目标屏幕状态 |
+| `POST /api/display/network-test` | 仅允许 `blink`、`online`、`no_internet`、`auto` 四种固定模式；测试 5 秒后自动恢复 |
 
 SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结束符，对应 SDK 的 `wifi_ssid[32]` 和 `wifi_key[64]`。页面刷新后密码输入框为空；密码不会出现在日志、`/api/info` 或 `/api/wifi/status` 中。STA 连接由 4096 字节栈的独立线程执行，最多等待 30 秒。只有 `micoWlanGetLinkStatus().is_connected == 1` 且 `micoWlanGetIPStatus(..., Station)` 返回有效 IP 才认定连接成功。断开调用 `micoWlanSuspendStation()`，不会调用会停止两种接口的 `micoWlanSuspend()`。
 
@@ -52,17 +53,17 @@ SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结�
 
 业务串口使用 SDK 的 `MICO_UART_FOR_APP`（UART1，TX GPIO9、RX GPIO10）；UART2 继续用于调试输出。参考 zM1 APP 的反汇编显示 UART1 使用 **115200 8N1**，20 字节帧以 `#` 开头、`!` 结尾，类型 `0x01` 含传感器字段。完整证据和地址见 [zM1 UART 逆向记录](docs/zm1-uart-reverse.md)。OpenM1 在 UART worker 中使用 2048 字节 RX ring、1024 字节原始数据历史和 4096 字节线程栈；初始化失败不会停止 Recovery。进入首页立即读取一次 `/api/sensors`，之后每 2 秒读取；离开首页或开始 OTA 时停止该轮询。读取失败时保留上次显示值并提示异常。诊断 Tab 提供原始数据和运行时波特率切换。
 
-**协议的校验规则仍为 PARTIAL，但四项数值已实机核对。** 参考 APP 对类型 `0x01` 仅检查固定长度、首尾和字段，未发现明确的 checksum/CRC 比对；OpenM1 增加取值范围筛查。所有数值在首次完整类型 `0x01` 帧出现前为 `null`，页面显示 `--`。原 zM1 启动时发送的 `23 02 64 01 00 00 00 00 00 00 00 21` 已确认是**亮度 4、屏幕开启**帧。v0.5.0 在 UART 初始化后等待 400 ms，发送当前保存的屏幕状态；诊断路由 `POST /api/uart/init` 保留兼容，但语义改为重新同步当前显示状态。
+**协议的校验规则仍为 PARTIAL，但四项数值已实机核对。** 参考 APP 对类型 `0x01` 仅检查固定长度、首尾和字段，未发现明确的 checksum/CRC 比对；OpenM1 增加取值范围筛查。所有数值在首次完整类型 `0x01` 帧出现前为 `null`，页面显示 `--`。原 zM1 启动时发送的 `23 02 64 01 00 00 00 00 00 00 00 21` 已确认是**亮度 4、屏幕开启**帧。v0.5.1 在 UART 初始化后等待 400 ms，发送当前保存的屏幕状态；诊断路由 `POST /api/uart/init` 保留兼容，但语义改为重新同步当前显示状态。
 
 新的实机 RX 已确认 type `0x0C` 日期时间帧和 type `0x0F` 帧。[定点逆向报告](docs/zm1-uart-type0f.md)表明 `0x0F` 进入亮度处理路径，`0x18` 可触发确认及重置路径；OpenM1 不发送 `0x18` 响应。`/api/uart/status` 将总帧、传感器帧、时间帧、亮度事件帧、`0x18`、未知帧、无效帧分别计数；M1 时间只显示，不写设备 RTC。
 
-v0.5.0 在 UART 在线、波特率稳定且没有 OTA 时，每 **2000 ms** 自动发送一次已实机验证的固定传感器请求 **`23 01 00 00 00 00 00 00 00 00 00 21`**。手工请求仍在诊断 Tab，所有发送由 UART worker 串行完成；没有任意 HEX 发送接口。首页每 **2000 ms** 请求一次 `/api/sensors`，离开首页后停止该定时器。
+v0.5.1 在 UART 在线、波特率稳定且没有 OTA 时，每 **2000 ms** 自动发送一次已实机验证的固定传感器请求 **`23 01 00 00 00 00 00 00 00 00 00 21`**。手工请求仍在诊断 Tab，所有发送由 UART worker 串行完成；没有任意 HEX 发送接口。首页每 **2000 ms** 请求一次 `/api/sensors`，离开首页后停止该定时器。
 
 屏幕亮度为 0–4 档：1–4 分别发送亮度字节 `19`、`32`、`4B`、`64`，开关字节为 `01`；0 档发送保存的最后非零档位并将开关字节置 `00`。实体 `0x0F` 亮度事件使用同一档位回复，500 ms 内的同状态回报不再次发送，避免回环。配置在 MiCO 参数区按 v1→v2 迁移，保留 MQTT/HA 设置与密码。亮度协议和 Android 客户端 0–4 的范围见 [定点逆向记录](docs/zm1-uart-type0f.md)。
 
-网络健康检查与 MQTT 独立：Station 有有效 IP 后，后台每 10 秒对 `223.5.5.5:53` 和 `1.1.1.1:53` 做最长 1800 ms 的 TCP connect 探测；两个连续成功判为在线，两个连续失败判为无 Internet。该状态表示**公共探测端点的 TCP 可达性**，不保证任意网站可访问。当前没有确认实体 Wi-Fi 图标和红 X 的控制帧，所以仅在网页/API 显示目标状态，**不向 ATSAMD20 发送未知图标命令**。
+网络健康检查与 MQTT 独立：Station 有有效 IP 后，后台每 10 秒对 `223.5.5.5:53` 和 `1.1.1.1:53` 做最长 1800 ms 的 TCP connect 探测；两个连续成功判为在线，两个连续失败判为无 Internet。该状态表示**公共探测端点的 TCP 可达性**，不保证任意网站可访问。参考 zM1 的定点反汇编确认实体 Wi-Fi 图标使用 PWM5、红 X 使用 PWM4，两路均为 50 kHz、20% 占空比；未连接时每 150 ms 启停 PWM5，在线时 PWM5 常开，已连接但无 Internet 时两路常开。OpenM1 沿用现有网络健康判断，**不发送新的图标 UART 命令，也不直接操作 GPIO13/14**。证据见 [逆向记录](docs/zm1-wifi-icon-reverse.md)。
 
-实机测试时请核对 v0.5.0 自动轮询不会影响 Recovery/OTA，并逐档验证亮度 0–4 与实体亮度开关。屏幕 Wi-Fi 图标仍未找到可信控制协议，见 [逆向记录](docs/zm1-wifi-icon-reverse.md)，本版不发送新的图标 UART/GPIO 控制动作。
+v0.5.1 的 PWM 协议已静态逆向确认，**OpenM1 的实体屏幕效果仍需实机验证**。诊断页提供三种固定硬件测试按钮和恢复自动状态按钮；测试会在 5 秒后自动回到实际网络状态。请按未连家庭 Wi-Fi、联网、有 Wi-Fi 但 WAN 断开、WAN 恢复四种场景核对图标和红 X。亮度和自动采样也需继续实机核对。
 
 ## MQTT 与 Home Assistant
 
@@ -74,7 +75,7 @@ Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置
 
 完整 MOC OTA 由 Kernel、填充到 `0x75000`、8 字节 APP 头、APP payload、末尾 16 字节 raw MD5 组成。上传或 URL 下载时使用 2048 字节静态缓冲流式写入 `MICO_PARTITION_OTA_TEMP`，然后从 Flash 回读长度、两份 APP CRC、payload CRC 和整个 OTA（不含尾部 MD5）的 MD5；另外计算 boot table 所需 CRC16。验证成功才调用 `mico_ota_switch_to_new_fw(total_size - 16, boot_crc16)`，发送 HTTP 成功响应，等待两秒后 `MicoSystemReboot()`。任一校验失败不写升级标志、不重启。最大 OTA 文件限制为分区实际长度与 `0xB5000` 两者较小值。
 
-`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.5.0 的亮度和网络健康状态已通过实机验证。**
+`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.5.1 的亮度和网络健康状态已通过实机验证。**
 
 ## 构建与验证
 
@@ -92,9 +93,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.5.0@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.5.1@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.5.0.bin
+  --app dist/OpenM1-v0.5.1.bin
 ```
 
-GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.5.0`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.5.0 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
+GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.5.1`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.5.1 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
