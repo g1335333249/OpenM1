@@ -358,6 +358,19 @@ static void wifi_control_worker(mico_thread_arg_t arg)
             armed=0; phase=WIFI_STA_IDLE; native_since=0;
             wifi_station_samples_reset(&samples);
             network_health_notify_link_down();
+        } else if (changed && !desired.want_connected && armed && phase!=WIFI_STA_CONNECTED) {
+            /* AUTO was disabled while its initial association was still pending. */
+            err=station_suspend();
+            armed=0; phase=WIFI_STA_IDLE; native_since=0;
+            wifi_station_samples_reset(&samples);
+            lock_status();
+            status.station_armed=0; status.last_wlan_error=err;
+            status.active=0; status.ssid[0]=0;
+            snprintf(status.state,sizeof(status.state),"disconnected");
+            status.recovery_ap_policy_closed=0;
+            clear_network();
+            unlock_status();
+            network_health_notify_link_down();
         }
         if (do_scan) {
             if (!armed && !desired.want_connected && !recovery_ota_busy()) {
