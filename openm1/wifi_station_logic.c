@@ -19,20 +19,21 @@ void wifi_station_samples_reset(wifi_station_samples_t *samples)
 {
     if (samples) memset(samples,0,sizeof(*samples));
 }
-uint32_t wifi_station_backoff_ms(unsigned failure_index)
+uint32_t wifi_ap_restore_backoff_ms(unsigned failure_index)
 {
     static const uint32_t values[]={2000u,5000u,10000u,20000u,30000u};
-    if (failure_index>=sizeof(values)/sizeof(values[0]))
-        failure_index=sizeof(values)/sizeof(values[0])-1;
+    if (failure_index>=sizeof(values)/sizeof(values[0])) failure_index=4;
     return values[failure_index];
 }
-station_phase_t wifi_station_phase_after_loss(int want_connected)
+int wifi_station_rearm_due(uint32_t now,uint32_t wait_since,uint32_t last_rearm)
 {
-    return want_connected?STATION_BACKOFF:STATION_IDLE;
+    return (uint32_t)(now-wait_since)>=WIFI_NATIVE_RECONNECT_GRACE_MS &&
+           (!last_rearm || (uint32_t)(now-last_rearm)>=WIFI_CONTROLLED_REARM_MIN_INTERVAL_MS);
 }
-void wifi_station_reset_backoff(unsigned *failure_index)
+int wifi_ap_close_eligible(int auto_connect,int disable_after_connect,
+                           int station_ready,int ssid_match,int ota_busy)
 {
-    if (failure_index) *failure_index=0;
+    return auto_connect && disable_after_connect && station_ready && ssid_match && !ota_busy;
 }
 void wifi_station_desire(wifi_station_desired_t *desired,const char *ssid,
                          const char *password,wifi_desired_source_t source)
@@ -54,14 +55,6 @@ void wifi_station_drop_auto_desired(wifi_station_desired_t *desired)
 {
     if (!desired || desired->source!=WIFI_DESIRED_AUTO) return;
     memset(desired,0,sizeof(*desired));
-}
-int wifi_station_cleanup_for_next_attempt(wifi_station_attempt_event_t event)
-{
-    return event==WIFI_STATION_START_ERROR || event==WIFI_STATION_CONNECT_TIMEOUT;
-}
-int wifi_station_should_cleanup(int station_started_once,int cleanup_required)
-{
-    return station_started_once && cleanup_required;
 }
 int wifi_recovery_ap_needs_restore(int close_eligible,int policy_closed,int observed_on)
 {

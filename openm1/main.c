@@ -38,7 +38,7 @@ int main(void)
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.2\r\n"
+           "Version: 0.6.3\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -110,8 +110,6 @@ int main(void)
     recovery_ota_partition_log();
     http_result=recovery_http_start();
     boot_log_init_error("HTTP",http_result);
-    wifi_result=wifi_manager_init();
-    boot_log_init_error("Wi-Fi manager",wifi_result);
     if (http_result==kNoErr) {
         unsigned wait_count;
         for (wait_count=0;wait_count<30 && !recovery_http_ready();wait_count++)
@@ -119,13 +117,20 @@ int main(void)
         if (!recovery_http_ready())
             printf("RECOVERY: HTTP listener not ready yet; continuing boot\r\n");
     }
+    printf("BOOT: phase 1 recovery ready\r\n");
     boot_log_init_error("config",config_store_init());
+    wifi_result=wifi_manager_init();
+    boot_log_init_error("Wi-Fi manager",wifi_result);
     boot_log_init_error("display",m1_display_init());
     boot_log_init_error("UART",m1_uart_init());
     boot_log_init_error("network health",network_health_init());
+    printf("BOOT: core services initialized\r\n");
     boot_log_init_error("Wi-Fi boot policy",wifi_manager_apply_boot_settings());
+    printf("BOOT: Wi-Fi control started\r\n");
+    mico_thread_msleep(500);
     boot_log_init_error("system stats",system_stats_init());
     boot_log_init_error("MQTT",mqtt_manager_init());
+    printf("BOOT: optional services initialized\r\n");
     printf("BOOT: subsystem initialization complete, free heap = %d\r\n",boot_free_heap());
     for (;;) {
         mico_thread_msleep(10000);
