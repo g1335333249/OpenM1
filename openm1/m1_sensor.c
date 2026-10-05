@@ -8,6 +8,12 @@ static int sensor_ready;
 static uint8_t frame[20];
 static unsigned frame_used;
 static int first_sensor_logged;
+static void (*brightness_callback)(uint8_t);
+
+void m1_sensor_set_brightness_callback(void (*callback)(uint8_t))
+{
+    brightness_callback=callback;
+}
 
 static void accept_frame(const uint8_t f[20])
 {
@@ -66,9 +72,8 @@ OSStatus m1_sensor_init(void)
     return err;
 }
 
-/* Reference zM1 uses 20-byte '#' ... '!' packets. Type 1 contains sensor
- * fields. No checksum was found in its parser, so this remains PARTIAL until
- * real UART bytes and the M1 display confirm the values. */
+/* Reference zM1 uses 20-byte '#' ... '!' packets. Type 1 values have been
+ * checked against the real M1 screen; the frame checksum rule remains unknown. */
 void m1_sensor_parse(const uint8_t *bytes, size_t length)
 {
     size_t i;
@@ -93,6 +98,7 @@ void m1_sensor_parse(const uint8_t *bytes, size_t length)
                     sensor.type0f_last_value=frame[2];
                     sensor.type0f_last_rx_ms=mico_rtos_get_time();
                     mico_rtos_unlock_mutex(&sensor_mutex);
+                    if (brightness_callback) brightness_callback(frame[2]);
                     break;
                 case 0x18:
                     mico_rtos_lock_mutex(&sensor_mutex);

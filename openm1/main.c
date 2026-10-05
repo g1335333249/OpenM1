@@ -5,6 +5,8 @@
 #include "m1_uart.h"
 #include "config_store.h"
 #include "mqtt_manager.h"
+#include "m1_display.h"
+#include "network_health.h"
 
 int main(void)
 {
@@ -20,7 +22,7 @@ int main(void)
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.4.1\r\n"
+           "Version: 0.5.0\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -88,11 +90,15 @@ int main(void)
             printf("WIFI: manager initialization failed\r\n");
         if (result==kNoErr) {
             while (!recovery_http_ready()) mico_thread_msleep(100);
+            if (config_store_init()!=kNoErr)
+                printf("CONFIG: persistence unavailable; Recovery remains active\r\n");
+            if (m1_display_init()!=kNoErr)
+                printf("DISPLAY: initialization failed; Recovery remains active\r\n");
             if (m1_uart_init() != kNoErr)
                 printf("SENSOR: UART diagnostic initialization failed; Recovery remains active\r\n");
-            if (config_store_init()!=kNoErr)
-                printf("CONFIG: MQTT persistence unavailable; Recovery remains active\r\n");
-            else if (mqtt_manager_init()!=kNoErr)
+            if (network_health_init()!=kNoErr)
+                printf("NETWORK: health monitor unavailable; Recovery remains active\r\n");
+            if (mqtt_manager_init()!=kNoErr)
                 printf("MQTT: manager initialization failed; Recovery remains active\r\n");
         }
     }

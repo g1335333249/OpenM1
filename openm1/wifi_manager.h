@@ -15,5 +15,6 @@ void wifi_manager_status_json(char *out, size_t out_size);
 int wifi_manager_start_scan(void);
 const char *wifi_manager_scan_json(void);
 int wifi_manager_station_ready(void);
+int wifi_manager_station_link(void);
 int wifi_manager_station_rssi(void);
 void wifi_manager_station_ip(char out[16]);

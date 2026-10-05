@@ -1,14 +1,13 @@
 #include "m1_uart.h"
 #include "m1_sensor.h"
+#include "m1_display.h"
+#include "recovery.h"
 #include "mico_hal/mico_uart.h"
 #include "RingBufferUtils.h"
 #include <stdio.h>
 #include <string.h>
 
-/* Exact frames found in the reference zM1 APP. No arbitrary UART TX. */
-static const uint8_t zm1_uart_init_command[12] = {
-    0x23,0x02,0x64,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x21
-};
+/* Hardware-verified sensor request. Brightness frames are validated below. */
 static const uint8_t zm1_sensor_request[12] = {
     0x23,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x21
 };
@@ -23,9 +22,11 @@ static uint32_t active_baud;
 static uint32_t rx_bytes;
 static uint32_t last_rx_ms;
 static uint32_t tx_bytes,tx_frames,last_tx_ms;
-static int init_command_sent,init_command_result;
+static int display_sync_sent,display_sync_result;
 static uint32_t manual_request,manual_completed;
 static int manual_result,manual_pending,manual_kind;
+static uint8_t manual_frame[12];
+static uint32_t last_sensor_request_ms;
 static unsigned history_head,history_count;
 static int worker_ready,uart_online;
 
@@ -70,30 +71,41 @@ static void record_rx(const uint8_t *data, unsigned length)
     m1_sensor_parse(data,length);
 }
 
-static OSStatus send_zm1_init_command(void)
+static int valid_display_frame(const uint8_t frame[12])
 {
-    OSStatus err;
-    printf("SENSOR: sending zM1 init command\r\n");
-    printf("SENSOR: TX 23 02 64 01 00 00 00 00 00 00 00 21\r\n");
-    err=MicoUartSend(MICO_UART_FOR_APP,zm1_uart_init_command,sizeof(zm1_uart_init_command));
-    mico_rtos_lock_mutex(&uart_mutex);
-    last_tx_ms=mico_rtos_get_time();
-    init_command_result=err;
-    if (err==kNoErr) {
-        tx_bytes+=sizeof(zm1_uart_init_command);
-        tx_frames++;
-        init_command_sent=1;
-    }
-    mico_rtos_unlock_mutex(&uart_mutex);
-    printf("SENSOR: init command result = %d\r\n",err);
-    return err;
+    unsigned i;
+    if (!frame || frame[0]!=0x23 || frame[1]!=0x02 || frame[11]!=0x21 ||
+        frame[3]>1 || (frame[2]!=0x19 && frame[2]!=0x32 &&
+                         frame[2]!=0x4b && frame[2]!=0x64)) return 0;
+    for (i=4;i<11;i++) if (frame[i]) return 0;
+    return 1;
 }
 
-static OSStatus send_zm1_sensor_request(void)
+int m1_uart_send_display_frame_from_worker(const uint8_t frame[12])
 {
     OSStatus err;
-    printf("SENSOR: sending one zM1 sensor request\r\n");
-    printf("SENSOR: TX 23 01 00 00 00 00 00 00 00 00 00 21\r\n");
+    if (!valid_display_frame(frame) || !uart_online || desired_baud!=active_baud ||
+        recovery_ota_busy()) return -2;
+    err=MicoUartSend(MICO_UART_FOR_APP,(uint8_t *)frame,12);
+    mico_rtos_lock_mutex(&uart_mutex);
+    last_tx_ms=mico_rtos_get_time();
+    display_sync_result=err;
+    if (err==kNoErr) {
+        tx_bytes+=12;
+        tx_frames++;
+        display_sync_sent=1;
+    }
+    mico_rtos_unlock_mutex(&uart_mutex);
+    printf("DISPLAY: TX %02X %02X %02X %02X 00 00 00 00 00 00 00 21, result=%d\r\n",
+           frame[0],frame[1],frame[2],frame[3],err);
+    return err==kNoErr?0:-4;
+}
+
+static OSStatus send_zm1_sensor_request(int manual)
+{
+    OSStatus err;
+    if (!uart_online || desired_baud!=active_baud || recovery_ota_busy()) return kNotPreparedErr;
+    if (manual) printf("SENSOR: TX 23 01 00 00 00 00 00 00 00 00 00 21\r\n");
     err=MicoUartSend(MICO_UART_FOR_APP,zm1_sensor_request,sizeof(zm1_sensor_request));
     mico_rtos_lock_mutex(&uart_mutex);
     last_tx_ms=mico_rtos_get_time();
@@ -101,14 +113,16 @@ static OSStatus send_zm1_sensor_request(void)
         tx_bytes+=sizeof(zm1_sensor_request);
         tx_frames++;
     }
+    last_sensor_request_ms=mico_rtos_get_time();
     mico_rtos_unlock_mutex(&uart_mutex);
-    printf("SENSOR: sensor request result = %d\r\n",err);
+    if (manual || err!=kNoErr) printf("SENSOR: sensor request result = %d\r\n",err);
     return err;
 }
 
 void m1_uart_worker(mico_thread_arg_t arg)
 {
     uint8_t batch[128];
+    uint8_t queued_frame[12];
     uint32_t wanted,available,now,last_log=0;
     unsigned count;
     OSStatus err;
@@ -139,15 +153,17 @@ void m1_uart_worker(mico_thread_arg_t arg)
             printf("SENSOR: UART1 receive ready, %lu 8N1\r\n",(unsigned long)wanted);
             printf("SENSOR: UART1 ready\r\n");
             mico_thread_msleep(400);
-            send_zm1_init_command();
+            m1_display_sync_from_uart_worker();
+            last_sensor_request_ms=mico_rtos_get_time();
         }
         mico_rtos_lock_mutex(&uart_mutex);
         if (manual_pending) {
             pending=1; request=manual_request;kind=manual_kind;manual_pending=0;
+            if (kind==1) memcpy(queued_frame,manual_frame,sizeof(queued_frame));
         }
         mico_rtos_unlock_mutex(&uart_mutex);
         if (pending) {
-            err=kind==2?send_zm1_sensor_request():send_zm1_init_command();
+            err=kind==2?send_zm1_sensor_request(1):m1_uart_send_display_frame_from_worker(queued_frame);
             mico_rtos_lock_mutex(&uart_mutex);
             manual_result=err; manual_completed=request;
             mico_rtos_unlock_mutex(&uart_mutex);
@@ -162,6 +178,9 @@ void m1_uart_worker(mico_thread_arg_t arg)
             else mico_thread_msleep(10);
         }
         now=mico_rtos_get_time();
+        if (uart_online && desired_baud==active_baud && !recovery_ota_busy() &&
+            now-last_sensor_request_ms>=M1_SENSOR_POLL_INTERVAL_MS)
+            send_zm1_sensor_request(0);
         if (now-last_log>=10000) {
             m1_sensor_snapshot_t snapshot;
             m1_sensor_get_snapshot(&snapshot);
@@ -183,6 +202,7 @@ OSStatus m1_uart_init(void)
     if (err!=kNoErr) return err;
     err=m1_sensor_init();
     if (err!=kNoErr) return err;
+    m1_sensor_set_brightness_callback(m1_display_handle_brightness_event);
     err=mico_rtos_create_thread(&uart_thread,MICO_APPLICATION_PRIORITY,"openm1_uart",
                                 m1_uart_worker,M1_UART_WORKER_STACK,0);
     if (err==kNoErr) worker_ready=1;
@@ -199,14 +219,14 @@ int m1_uart_set_baud(uint32_t baud)
     return 0;
 }
 
-static int request_fixed_command(int kind)
+static int request_fixed_command(int kind, const uint8_t frame[12])
 {
     uint32_t request;
     unsigned waited;
     int result;
     if (!worker_ready) return -2;
     mico_rtos_lock_mutex(&uart_mutex);
-    if (!uart_online || desired_baud!=active_baud) {
+    if (!uart_online || desired_baud!=active_baud || recovery_ota_busy()) {
         mico_rtos_unlock_mutex(&uart_mutex);
         return -2;
     }
@@ -216,6 +236,7 @@ static int request_fixed_command(int kind)
     }
     request=++manual_request;
     manual_kind=kind;
+    if (kind==1) memcpy(manual_frame,frame,sizeof(manual_frame));
     manual_pending=1;
     mico_rtos_unlock_mutex(&uart_mutex);
     for (waited=0;waited<3000;waited+=20) {
@@ -233,12 +254,18 @@ static int request_fixed_command(int kind)
 
 int m1_uart_send_init_command(void)
 {
-    return request_fixed_command(1);
+    return m1_display_sync();
 }
 
 int m1_uart_request_sensors(void)
 {
-    return request_fixed_command(2);
+    return request_fixed_command(2,NULL);
+}
+
+int m1_uart_send_display_frame(const uint8_t frame[12])
+{
+    if (!valid_display_frame(frame)) return -1;
+    return request_fixed_command(1,frame);
 }
 
 void m1_uart_status_json(char *out, size_t capacity)
@@ -251,7 +278,7 @@ void m1_uart_status_json(char *out, size_t capacity)
         mico_rtos_lock_mutex(&uart_mutex);
         baud=active_baud;bytes=rx_bytes;last=last_rx_ms;online=uart_online;
         tx_count=tx_bytes;tx_frame_count=tx_frames;last_tx=last_tx_ms;
-        sent=init_command_sent;tx_result=init_command_result;
+        sent=display_sync_sent;tx_result=display_sync_result;
         mico_rtos_unlock_mutex(&uart_mutex);
     } else { baud=0;bytes=0;last=0;online=0;tx_count=0;tx_frame_count=0;last_tx=0;sent=0;tx_result=0; }
     snprintf(out,capacity,
@@ -262,7 +289,7 @@ void m1_uart_status_json(char *out, size_t capacity)
              "\"type0f_last_value\":%u,\"type0f_last_rx_ms\":%lu,"
              "\"last_rx_ms\":%lu,\"last_rx_age_ms\":%lu,\"tx_bytes\":%lu,\"tx_frames\":%lu,"
              "\"last_tx_ms\":%lu,\"last_tx_age_ms\":%lu,\"init_command_sent\":%s,\"init_command_result\":%d,"
-             "\"parser\":\"zm1-type1-partial\",\"protocol_verified\":false,\"passive_rx_only\":false,\"fixed_init_command_only\":false,\"fixed_commands_only\":true,\"sensor_auto_polling\":false}",
+             "\"parser\":\"zm1-type1-verified\",\"protocol_verified\":true,\"passive_rx_only\":false,\"fixed_init_command_only\":false,\"fixed_commands_only\":true,\"sensor_auto_polling\":true,\"sensor_poll_interval_ms\":2000}",
              (unsigned long)baud,online?"true":"false",(unsigned long)bytes,
              (unsigned long)s.total_frames,(unsigned long)s.sensor_frames,
              (unsigned long)s.time_frames,(unsigned long)s.type0f_frames,

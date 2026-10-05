@@ -4,6 +4,8 @@
 #include "m1_sensor.h"
 #include "mqtt_manager.h"
 #include "json_min.h"
+#include "m1_display.h"
+#include "network_health.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -194,9 +196,13 @@ static void handle_client(int fd)
             mqtt_manager_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/homeassistant/status")) {
             homeassistant_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/display/status")) {
+            m1_display_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/network/health")) {
+            network_health_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.4.1\",\"version\":\"0.4.1\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.5.0\",\"version\":\"0.5.0\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -209,6 +215,22 @@ static void handle_client(int fd)
         goto done;
     }
     if (strcmp(method,"POST")) { recovery_send_json(fd,405,"{\"message\":\"Method not allowed\"}"); goto done; }
+    if (!strcmp(path,"/api/display/brightness")) {
+        char body[65]; json_min_field_t field[1]; int parsed,result;
+        if (!seen || !read_small_body(fd,request,body_start,body_len,length,body,sizeof(body))) {
+            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"亮度请求无效。\"}"); goto done;
+        }
+        parsed=json_min_parse(body,length,field,1);
+        if (parsed!=1 || strcmp(field[0].key,"brightness") || field[0].kind!='n' ||
+            strlen(field[0].value)!=1 || field[0].value[0]<'0' || field[0].value[0]>'4') {
+            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"亮度只允许 0 到 4。\"}"); goto done;
+        }
+        if (recovery_ota_busy()) { recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"固件升级期间暂停显示控制。\"}"); goto done; }
+        result=m1_display_set_brightness((uint8_t)(field[0].value[0]-'0'));
+        if (result==0) recovery_send_json(fd,200,"{\"ok\":true}");
+        else recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"显示串口暂不可用。\"}");
+        goto done;
+    }
     if (!strcmp(path,"/api/wifi/scan")) {
         int result=wifi_manager_start_scan();
         if (!result) recovery_send_json(fd,202,"{\"ok\":true,\"state\":\"scanning\"}");
@@ -302,10 +324,10 @@ static void handle_client(int fd)
         }
         result=m1_uart_send_init_command();
         if (result==0) recovery_send_json(fd,200,"{\"ok\":true,\"bytes\":12}");
-        else if (result==-3) recovery_send_json(fd,409,"{\"ok\":false,\"error\":\"UART init command already pending\"}");
+        else if (result==-3) recovery_send_json(fd,409,"{\"ok\":false,\"error\":\"Display sync already pending\"}");
         else if (result==-2) recovery_send_json(fd,503,"{\"ok\":false,\"error\":\"UART1 is not ready\"}");
-        else if (result==-5) recovery_send_json(fd,503,"{\"ok\":false,\"error\":\"UART init command timed out\"}");
-        else recovery_send_json(fd,503,"{\"ok\":false,\"error\":\"UART init command send failed\"}");
+        else if (result==-5) recovery_send_json(fd,503,"{\"ok\":false,\"error\":\"Display sync timed out\"}");
+        else recovery_send_json(fd,503,"{\"ok\":false,\"error\":\"Display sync failed\"}");
         goto done;
     }
     if (!strcmp(path,"/api/uart/sensor-request")) {

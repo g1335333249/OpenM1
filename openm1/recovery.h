@@ -1,5 +1,6 @@
 #pragma once
 #include "mico.h"
+#include <stddef.h>
 #include <stdint.h>
 
 #define RECOVERY_FALLBACK_SSID "OpenM1-RECOVERY"

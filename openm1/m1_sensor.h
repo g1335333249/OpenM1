@@ -31,5 +31,6 @@ typedef struct {
 
 OSStatus m1_sensor_init(void);
 void m1_sensor_parse(const uint8_t *bytes, size_t length);
+void m1_sensor_set_brightness_callback(void (*callback)(uint8_t));
 void m1_sensor_get_snapshot(m1_sensor_snapshot_t *out);
 void m1_sensor_json(char *out, size_t capacity);

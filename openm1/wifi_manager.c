@@ -1,5 +1,6 @@
 #include "wifi_manager.h"
 #include "recovery.h"
+#include "network_health.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -109,6 +110,7 @@ static void set_failure(const char *message)
     status.active=0;
     unlock_status();
     printf("WIFI: STA connect failed\r\n");
+    network_health_notify_link_down();
 }
 static void wifi_sta_worker(mico_thread_arg_t arg)
 {
@@ -153,6 +155,7 @@ static void wifi_sta_worker(mico_thread_arg_t arg)
             status.message[0]=0; status.active=0;
             unlock_status();
             printf("WIFI: link connected\r\nWIFI: DHCP IP = %s\r\nWIFI: RSSI = %d\r\n",ip.ip,link.rssi);
+            network_health_notify_link_ready();
             goto exit;
         }
     }
@@ -169,6 +172,7 @@ cancelled_exit:
     clear_network();
     memset(&sta_config,0,sizeof(sta_config));
     unlock_status();
+    network_health_notify_link_down();
 exit:
     mico_rtos_delete_thread(NULL);
 }
@@ -226,6 +230,7 @@ int wifi_manager_disconnect(void)
     if (!status.active) { status.cancel=0; memset(&sta_config,0,sizeof(sta_config)); }
     unlock_status();
     printf("WIFI: STA disconnected\r\n");
+    network_health_notify_link_down();
     return err==kNoErr?0:-1;
 }
 static void json_string(char *out, size_t capacity, const char *input)
@@ -337,6 +342,12 @@ int wifi_manager_station_ready(void)
         micoWlanGetIPStatus(&ip,Station)!=kNoErr) return 0;
     ip.ip[sizeof(ip.ip)-1]=0;
     return valid_ip(ip.ip);
+}
+int wifi_manager_station_link(void)
+{
+    LinkStatusTypeDef link;
+    memset(&link,0,sizeof(link));
+    return micoWlanGetLinkStatus(&link)==kNoErr && link.is_connected==1;
 }
 int wifi_manager_station_rssi(void)
 {

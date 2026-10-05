@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #define OPENM1_CONFIG_MAGIC 0x314d504fu
-#define OPENM1_CONFIG_VERSION 1u
+#define OPENM1_CONFIG_VERSION 2u
 typedef struct {
     uint32_t magic;
     uint16_t version;
@@ -20,9 +20,13 @@ typedef struct {
     uint8_t mqtt_enabled;
     uint8_t ha_enabled;
     uint8_t reserved[2];
+    uint8_t brightness_level;
+    uint8_t last_nonzero_brightness;
+    uint8_t display_reserved[2];
 } openm1_config_t;
 
 void config_store_defaults(openm1_config_t *config);
 OSStatus config_store_init(void);
 void config_store_get(openm1_config_t *out);
 OSStatus config_store_save(const openm1_config_t *config);
+OSStatus config_store_save_brightness(uint8_t brightness, uint8_t last_nonzero);

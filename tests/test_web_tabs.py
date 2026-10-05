@@ -51,8 +51,13 @@ assert '500,1000,2000' in source
 assert 'mqttFormInitialized' in source and 'haFormInitialized' in source
 assert "if($('mqtt-password').value)c.password=" in source
 for route in ('/api/wifi/scan', '/api/mqtt/status', '/api/homeassistant/status',
-              '/api/ota/upload', '/api/ota/url', '/api/uart/init', '/api/uart/raw'):
+              '/api/ota/upload', '/api/ota/url', '/api/uart/init', '/api/uart/raw',
+              '/api/display/status', '/api/display/brightness', '/api/network/health'):
     assert route in source, route
 for label in ('实时环境数据', '温度', '湿度', 'PM2.5', '甲醛', '亮度事件帧'):
     assert label in source, label
+assert "$('display-brightness').addEventListener('input',showBrightnessLabel)" in source
+assert "$('display-brightness').addEventListener('change',async()=>" in source
+assert '重新同步显示状态' in source
+assert '本版不会自动轮询' not in source
 print('WEB_TABS_PASS: 7 tabs, hash, independent OTA polling, retained API and UTF-8')
