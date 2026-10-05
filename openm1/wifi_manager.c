@@ -443,6 +443,10 @@ static void wifi_control_worker(mico_thread_arg_t arg)
                     station_suspend();
                     mico_thread_msleep(500);
                     failed_start_needs_cleanup=0;
+                    lock_status();
+                    status.station_rearm_count++;
+                    status.last_station_rearm_ms=mico_rtos_get_time();
+                    unlock_status();
                 }
                 if (!status.station_started_once) printf("WIFI: first Station arm\r\n");
                 else printf("WIFI: Station arm\r\n");
