@@ -5,6 +5,14 @@
 #define WIFI_STATION_LOSS_THRESHOLD 3u
 #define WIFI_STATION_READY_THRESHOLD 2u
 #define WIFI_STATION_SUPERVISOR_STACK 4096u
+#define WIFI_BOOT_AUTO_CONNECT_GRACE_MS 2000u
+
+typedef enum {
+    WIFI_STATION_FIRST_START,
+    WIFI_STATION_LINK_LOST,
+    WIFI_STATION_START_ERROR,
+    WIFI_STATION_CONNECT_TIMEOUT
+} wifi_station_attempt_event_t;
 
 typedef enum {
     WIFI_DESIRED_NONE,
@@ -36,3 +44,6 @@ void wifi_station_desire(wifi_station_desired_t *desired,const char *ssid,
                          const char *password,wifi_desired_source_t source);
 void wifi_station_manual_disconnect(wifi_station_desired_t *desired);
 void wifi_station_drop_auto_desired(wifi_station_desired_t *desired);
+int wifi_station_cleanup_for_next_attempt(wifi_station_attempt_event_t event);
+int wifi_station_should_cleanup(int station_started_once,int cleanup_required);
+int wifi_recovery_ap_needs_restore(int close_eligible,int policy_closed,int observed_on);

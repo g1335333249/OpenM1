@@ -178,6 +178,7 @@ OSStatus m1_display_init(void)
         state.last_pwm_result=err;
         mico_rtos_unlock_mutex(&display_mutex);
         printf("DISPLAY: network PWM worker start failed: %d\r\n",err);
+        return err; /* main() reports the error together with free heap. */
     }
     return kNoErr;
 }

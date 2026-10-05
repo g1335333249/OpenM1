@@ -20,6 +20,23 @@ int main(void)
     assert(!samples.good_samples && !samples.bad_samples);
     for (i=0;i<sizeof(expected)/sizeof(expected[0]);i++)
         assert(wifi_station_backoff_ms(i)==expected[i]);
+    assert(!wifi_station_should_cleanup(0,0)); /* cold boot: StartNetwork directly */
+    assert(!wifi_station_should_cleanup(0,1)); /* never suspend before first start */
+    assert(!wifi_station_cleanup_for_next_attempt(WIFI_STATION_FIRST_START));
+    assert(!wifi_station_cleanup_for_next_attempt(WIFI_STATION_LINK_LOST));
+    assert(wifi_station_cleanup_for_next_attempt(WIFI_STATION_START_ERROR));
+    assert(wifi_station_cleanup_for_next_attempt(WIFI_STATION_CONNECT_TIMEOUT));
+    assert(!wifi_station_should_cleanup(1,
+        wifi_station_cleanup_for_next_attempt(WIFI_STATION_LINK_LOST)));
+    assert(wifi_station_should_cleanup(1,
+        wifi_station_cleanup_for_next_attempt(WIFI_STATION_START_ERROR)));
+    assert(wifi_station_should_cleanup(1,
+        wifi_station_cleanup_for_next_attempt(WIFI_STATION_CONNECT_TIMEOUT)));
+    assert(!wifi_recovery_ap_needs_restore(0,0,1)); /* AP required and observed */
+    assert(wifi_recovery_ap_needs_restore(0,0,0)); /* AP missing */
+    assert(!wifi_recovery_ap_needs_restore(1,1,0)); /* intentional close */
+    assert(wifi_recovery_ap_needs_restore(0,1,0)); /* Station lost */
+    assert(wifi_recovery_ap_needs_restore(1,0,0)); /* missing before planned close */
     assert(wifi_station_backoff_ms(100)==30000);
     assert(wifi_station_phase_after_loss(1)==STATION_BACKOFF);
     assert(wifi_station_phase_after_loss(0)==STATION_IDLE);

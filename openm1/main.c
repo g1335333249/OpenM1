@@ -9,6 +9,19 @@
 #include "network_health.h"
 #include "system_stats.h"
 
+static int boot_free_heap(void)
+{
+    micoMemInfo_t *memory=MicoGetMemoryInfo();
+    return memory?memory->free_memory:-1;
+}
+
+static void boot_log_init_error(const char *module,OSStatus error)
+{
+    if (error!=kNoErr)
+        printf("BOOT: %s initialization failed: %d, free heap = %d\r\n",
+               module,error,boot_free_heap());
+}
+
 int main(void)
 {
     network_InitTypeDef_st wifi_config;
@@ -17,13 +30,15 @@ int main(void)
     uint8_t mac[6] = {0};
     char recovery_ssid[32] = RECOVERY_FALLBACK_SSID;
     char mac_text[18] = {0};
-    OSStatus result;
+    OSStatus result,ap_result,http_result,wifi_result;
+    unsigned attempt;
+    static const unsigned retry_delay_ms[] = {500u,1000u};
     unsigned long counter = 0;
     micoMemInfo_t *memory;
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.1\r\n"
+           "Version: 0.6.2\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -76,37 +91,42 @@ int main(void)
     memcpy(wifi_config.dnsServer_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     wifi_config.dhcpMode = DHCP_Server;
     printf("RECOVERY: SoftAP SSID = %s\r\n", recovery_ssid);
-    printf("RECOVERY: calling StartNetwork\r\n");
-    result = StartNetwork(&wifi_config);
-    printf("RECOVERY: StartNetwork result = %d\r\n", result);
-    if (result == kNoErr) {
+    ap_result=kGeneralErr;
+    for (attempt=0;attempt<3;attempt++) {
+        if (attempt) mico_thread_msleep(retry_delay_ms[attempt-1]);
+        printf("RECOVERY: SoftAP start attempt %u\r\n",attempt+1);
+        printf("RECOVERY: calling StartNetwork(SoftAP)\r\n");
+        ap_result=StartNetwork(&wifi_config);
+        printf("RECOVERY: StartNetwork(SoftAP) result = %d\r\n",ap_result);
+        if (ap_result==kNoErr) break;
+    }
+    if (ap_result==kNoErr) {
         printf("RECOVERY: SoftAP ready\r\n");
         printf("RECOVERY: WiFi ready\r\n");
         printf("RECOVERY: IP = %s\r\n", RECOVERY_IP);
-        recovery_ota_partition_log();
-        result=recovery_http_start();
-        if (result != kNoErr)
-            printf("RECOVERY: HTTP server failed to start\r\n");
-        else if (wifi_manager_init() != kNoErr)
-            printf("WIFI: manager initialization failed\r\n");
-        if (result==kNoErr) {
-            while (!recovery_http_ready()) mico_thread_msleep(100);
-            if (config_store_init()!=kNoErr)
-                printf("CONFIG: persistence unavailable; Recovery remains active\r\n");
-            if (m1_display_init()!=kNoErr)
-                printf("DISPLAY: initialization failed; Recovery remains active\r\n");
-            if (m1_uart_init() != kNoErr)
-                printf("SENSOR: UART diagnostic initialization failed; Recovery remains active\r\n");
-            if (network_health_init()!=kNoErr)
-                printf("NETWORK: health monitor unavailable; Recovery remains active\r\n");
-            if (wifi_manager_apply_boot_settings()!=kNoErr)
-                printf("WIFI: boot policy unavailable; Recovery remains active\r\n");
-            if (system_stats_init()!=kNoErr)
-                printf("STATS: sampler unavailable; Recovery remains active\r\n");
-            if (mqtt_manager_init()!=kNoErr)
-                printf("MQTT: manager initialization failed; Recovery remains active\r\n");
-        }
+    } else {
+        printf("RECOVERY: initial SoftAP unavailable; AP policy will retry\r\n");
     }
+    recovery_ota_partition_log();
+    http_result=recovery_http_start();
+    boot_log_init_error("HTTP",http_result);
+    wifi_result=wifi_manager_init();
+    boot_log_init_error("Wi-Fi manager",wifi_result);
+    if (http_result==kNoErr) {
+        unsigned wait_count;
+        for (wait_count=0;wait_count<30 && !recovery_http_ready();wait_count++)
+            mico_thread_msleep(100);
+        if (!recovery_http_ready())
+            printf("RECOVERY: HTTP listener not ready yet; continuing boot\r\n");
+    }
+    boot_log_init_error("config",config_store_init());
+    boot_log_init_error("display",m1_display_init());
+    boot_log_init_error("UART",m1_uart_init());
+    boot_log_init_error("network health",network_health_init());
+    boot_log_init_error("Wi-Fi boot policy",wifi_manager_apply_boot_settings());
+    boot_log_init_error("system stats",system_stats_init());
+    boot_log_init_error("MQTT",mqtt_manager_init());
+    printf("BOOT: subsystem initialization complete, free heap = %d\r\n",boot_free_heap());
     for (;;) {
         mico_thread_msleep(10000);
         memory = MicoGetMemoryInfo();

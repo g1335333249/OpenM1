@@ -55,3 +55,15 @@ void wifi_station_drop_auto_desired(wifi_station_desired_t *desired)
     if (!desired || desired->source!=WIFI_DESIRED_AUTO) return;
     memset(desired,0,sizeof(*desired));
 }
+int wifi_station_cleanup_for_next_attempt(wifi_station_attempt_event_t event)
+{
+    return event==WIFI_STATION_START_ERROR || event==WIFI_STATION_CONNECT_TIMEOUT;
+}
+int wifi_station_should_cleanup(int station_started_once,int cleanup_required)
+{
+    return station_started_once && cleanup_required;
+}
+int wifi_recovery_ap_needs_restore(int close_eligible,int policy_closed,int observed_on)
+{
+    return !observed_on && (!close_eligible || !policy_closed);
+}
