@@ -454,7 +454,9 @@ static int recovery_ap_probe(void)
     lock_status();
     status.recovery_ap_observed_on=observed;
     status.recovery_ap_last_probe_ms=mico_rtos_get_time();
-    status.recovery_ap_last_error=err==kNoErr?(observed?0:-1):err;
+    if (observed) status.recovery_ap_last_error=0;
+    else if (!status.recovery_ap_last_error)
+        status.recovery_ap_last_error=err==kNoErr?-1:err;
     unlock_status();
     return observed;
 }
