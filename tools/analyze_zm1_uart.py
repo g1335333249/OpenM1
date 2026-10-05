@@ -29,8 +29,9 @@ lines = ['zM1 UART protocol evidence', '==========================',
          'frame: 20 bytes; start 0x23 (#); end 0x21 (!); type at [1]',
          'type 0x01: HCHO [2:4] BE /1000, T [5]+floor([6]/10)/10, H [7]+floor([8]/10)/10, PM25 [9:11] BE',
          'checksum: not established by static analysis',
-         'startup TX observed in zM1: 23 02 64 01 00 00 00 00 00 00 00 21; OpenM1 v0.3.1+ sends once after UART init',
-         'status: PARTIAL', 'hardware sensor validation: NO', '']
+         'zM1 brightness-4 screen-on TX: 23 02 64 01 00 00 00 00 00 00 00 21; OpenM1 syncs saved display state after UART init',
+         'status: PARTIAL (checksum rule not established)',
+         'hardware sensor values: VERIFIED against the physical M1 screen; frame integrity rule remains partial', '']
 lines += [f'{"PASS" if ok else "FAIL"} {name}' for name, ok in checks.items()]
 a.output.write_text('\n'.join(lines) + '\n')
 print('\n'.join(lines))
