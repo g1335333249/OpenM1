@@ -48,7 +48,7 @@ SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结�
 
 ## 传感器桥接与串口诊断
 
-业务串口使用 SDK 的 `MICO_UART_FOR_APP`（UART1，TX GPIO9、RX GPIO10）；UART2 继续用于调试输出。参考 zM1 APP 的反汇编显示 UART1 使用 **115200 8N1**，20 字节帧以 `#` 开头、`!` 结尾，类型 `0x01` 含传感器字段。完整证据和地址见 [zM1 UART 逆向记录](docs/zm1-uart-reverse.md)。OpenM1 在 UART worker 中使用 2048 字节 RX ring、1024 字节原始数据历史和 4096 字节线程栈；初始化失败不会停止 Recovery。首页每秒读取 `/api/sensors`，诊断 Tab 提供原始数据和运行时波特率切换。
+业务串口使用 SDK 的 `MICO_UART_FOR_APP`（UART1，TX GPIO9、RX GPIO10）；UART2 继续用于调试输出。参考 zM1 APP 的反汇编显示 UART1 使用 **115200 8N1**，20 字节帧以 `#` 开头、`!` 结尾，类型 `0x01` 含传感器字段。完整证据和地址见 [zM1 UART 逆向记录](docs/zm1-uart-reverse.md)。OpenM1 在 UART worker 中使用 2048 字节 RX ring、1024 字节原始数据历史和 4096 字节线程栈；初始化失败不会停止 Recovery。进入首页立即读取一次 `/api/sensors`，之后每 2 秒读取；离开首页或开始 OTA 时停止该轮询。读取失败时保留上次显示值并提示异常。诊断 Tab 提供原始数据和运行时波特率切换。
 
 **协议状态为 PARTIAL。** 参考 APP 对类型 `0x01` 仅检查固定长度、首尾和字段，未发现明确的 checksum/CRC 比对；OpenM1 增加取值范围筛查，但不会把结构有效帧称为“校验和通过”。所有数值在首次完整类型 `0x01` 帧出现前为 `null`，页面显示 `--`。v0.3.0 实机持续观察到 UART1 `rx_bytes=0`；zM1 参考 APP 在 UART 初始化后发送过一次固定 12 字节帧。因此 v0.3.1 在 UART1 初始化成功后等待 400 ms，发送 **`23 02 64 01 00 00 00 00 00 00 00 21`** 一次；网页切换波特率并重新初始化后也发送一次。`POST /api/uart/init` 可手工重发同一帧。其业务含义尚未确认，**没有任意 HEX 发送接口，也不周期 polling**。
 

@@ -36,6 +36,15 @@ assert "activateTab(location.hash.slice(1))" in source
 assert "panel.hidden=panel.dataset.panel!==id" in source
 assert 'history.replaceState' in source
 assert 'startOtaPolling()' in source and 'stopOtaPolling()' in source
+assert 'const SENSOR_REFRESH_INTERVAL_MS=2000;' in source
+assert 'overviewSensorTimer=setInterval(pollOverviewSensors,SENSOR_REFRESH_INTERVAL_MS)' in source
+assert 'clearInterval(overviewSensorTimer)' in source
+assert 'if(force)sensorPollQueued=true' in source
+assert "if(id==='overview')startOverviewSensorPolling()" in source
+assert 'function startOtaPolling(){if(otaTimer)return;stopOverviewSensorPolling()' in source
+overview_scheduler = source.split("if(activeTab==='overview'){if(now-lastOverviewTick", 1)[1].split("else if(activeTab==='network'", 1)[0]
+assert 'refreshSensors()' not in overview_scheduler, 'overview sensors must use only the dedicated 2 s timer'
+assert '暂时无法读取传感器数据，已保留上次显示值' in source
 assert "if(activeTab==='diagnostics')" in source
 assert "'/api/uart/sensor-request'" in source
 assert '500,1000,2000' in source
