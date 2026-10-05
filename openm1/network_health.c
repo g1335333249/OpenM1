@@ -70,7 +70,6 @@ static void health_worker(mico_thread_arg_t arg)
     network_health_state_t old,next;
     (void)arg;
     for (;;) {
-        m1_display_network_test_tick();
         connected=wifi_manager_station_ready();
         mico_rtos_lock_mutex(&health_mutex);
         old=health.state;

@@ -1,6 +1,6 @@
 # zM1 Wi-Fi 图标与红 X PWM 控制定点逆向
 
-状态：**静态逆向已确认；OpenM1 v0.5.1 实机验证待完成。** 参考文件 `reference/zM1@MK3080B@moc.ota.bin` 为 600292 字节，SHA256 `20c5e6ae1692e3e047063b637b137635ab9e57711dba7c27ef0eb6cf1390887e`，Kernel `3080B002.024`。APP payload 从 OTA `0x75008` 起，反汇编载入基址 `0x08088008`。使用固定 GCC 5.4.1：
+状态：**静态逆向已确认；PWM5 载波点亮 Wi-Fi 图标已实机验证；完整三态仍待验证。** 参考文件 `reference/zM1@MK3080B@moc.ota.bin` 为 600292 字节，SHA256 `20c5e6ae1692e3e047063b637b137635ab9e57711dba7c27ef0eb6cf1390887e`，Kernel `3080B002.024`。APP payload 从 OTA `0x75008` 起，反汇编载入基址 `0x08088008`。使用固定 GCC 5.4.1：
 
 ```sh
 arm-none-eabi-objdump -D -b binary -m arm -M force-thumb \
@@ -23,9 +23,9 @@ arm-none-eabi-objdump -D -b binary -m arm -M force-thumb \
 | `1` | `0x0808c448–0x0808c458` | Start | Stop |
 | `2` | `0x0808c45c–0x0808c46c` | Start | Start |
 
-参考 zM1 的闪烁定时器以 **150 ms** 调用状态 `-1`，所以载波约 150 ms 开、150 ms 关，完整可见周期约 300 ms。OpenM1 以 `mico_rtos_init_timer(..., 150, ...)` 复刻，并通过同 SDK 的 `MicoPwmStart` / `MicoPwmStop` 操作符号通道；不直接控制 GPIO13/14。
+参考 zM1 的闪烁定时器以 **150 ms** 调用状态 `-1`，所以载波约 150 ms 开、150 ms 关，完整可见周期约 300 ms。OpenM1 v0.5.2 改用普通线程每 150 ms 切换载波，并通过同 SDK 的 `MicoPwmStart` / `MicoPwmStop` 操作符号通道；不直接控制 GPIO13/14。
 
-## OpenM1 v0.5.1 映射
+## OpenM1 v0.5.2 映射
 
 - `NETWORK_NO_WIFI` 和 `NETWORK_CHECKING` → `M1_NET_DISPLAY_DISCONNECTED`：PWM5 150 ms 闪烁，PWM4 Stop。
 - `NETWORK_ONLINE` → `M1_NET_DISPLAY_ONLINE`：PWM5 Start，PWM4 Stop。
@@ -33,4 +33,10 @@ arm-none-eabi-objdump -D -b binary -m arm -M force-thumb \
 
 业务判断仍来自 OpenM1 的 Station IP 与两个公共 TCP 探测点，不恢复原厂云连接。Recovery SoftAP 不算 Station 在线。参考 zM1 的 UART TX 生产者分别用于传感器请求、亮度、时间和 type `0x18` 确认；本版**没有新增任何 Wi-Fi UART 命令**。`0x0F` 仍只处理亮度。
 
-协议证据是静态反汇编和固定 SDK 映射；**OpenM1 的 PWM5 图标闪烁/常亮和 PWM4 红 X 还没有真实 M1 验证**。Manifest 的 `wifi_icon_protocol_reverse_verified`、`red_x_protocol_reverse_verified` 为 true，两个 `*_hardware_verified` 保持 false，直到实机四场景验证通过。
+## v0.5.1 实机故障与 v0.5.2 修复
+
+真实 M1 刷入 v0.5.1 后，PWM5 Start 使实体 Wi-Fi 图标亮起，证明 **PWM5 载波与图标的硬件关系**。随后串口打印 `DISPLAY: network -> blink`，紧接着出现 HardFault；日志有 `Task name IDLE`、`LR 0xFFFFFFF1`、`HFSR 0x80000000`。SoftAP 和 HTTP 此前已报告就绪，但故障后热点连接不稳定。
+
+**高可信疑因**是 v0.5.1 的 150 ms RTOS timer callback 中调用互斥锁与 PWM HAL。这些日志尚不能单独证明异常精确发生于哪条指令。v0.5.2 删除网络显示 RTOS timer，由独立普通线程作为 PWM5/PWM4 Start/Stop 的唯一执行者；HAL 调用时不持有显示互斥锁。PWM 通道、50 kHz、20% 和 150 ms 相位均保持不变，Kernel 仍为 `3080B002.023`。
+
+Manifest 中 `wifi_icon_pwm_carrier_hardware_verified=true`；**完整闪烁/常亮、红 X 与 v0.5.2 Recovery 稳定性仍待真实 M1 验证**，因此 `wifi_icon_hardware_verified=false`、`red_x_hardware_verified=false`。

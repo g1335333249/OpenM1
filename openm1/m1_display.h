@@ -13,6 +13,7 @@ typedef enum {
 #define M1_DISPLAY_PWM_FREQUENCY_HZ 50000u
 #define M1_DISPLAY_PWM_DUTY_PERCENT 20.0f
 #define M1_WIFI_BLINK_INTERVAL_MS 150u
+#define M1_NETWORK_DISPLAY_WORKER_STACK 2048u
 
 typedef struct {
     bool wifi_blink;
@@ -29,7 +30,8 @@ typedef struct {
     bool network_pwm_ready;
     bool wifi_pwm_running;
     bool red_x_pwm_running;
-    bool blink_timer_running;
+    bool display_worker_running;
+    bool blink_phase_on;
     bool network_test_active;
     int last_pwm_result;
 } m1_display_status_t;
@@ -46,6 +48,5 @@ void m1_display_set_network_state(m1_net_display_state_t target);
 void m1_display_network_output_for_state(m1_net_display_state_t target,
                                          m1_display_network_output_t *out);
 int m1_display_network_test(const char *mode);
-void m1_display_network_test_tick(void);
 void m1_display_get_status(m1_display_status_t *out);
 void m1_display_status_json(char *out, size_t capacity);
