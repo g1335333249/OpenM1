@@ -1,10 +1,12 @@
-# OpenM1 v0.6.0
+# OpenM1 v0.6.1
 
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
 ## 实机验证状态
 
 用户已在真实 M1 上验证 Recovery SoftAP、动态 SSID、`192.168.4.1`、中文 Web 页面、AP+STA 家庭 Wi-Fi 连接、网页 OTA、Bootloader 应用升级及升级后自动恢复。UART1 的 `0x01` 传感器请求和四项解析数值已经与实体屏幕核对；`0x0C` 时间帧和 `0x0F` 亮度事件也已收到。OTA_TEMP 分区起始 `0x00110000`、长度 `0xB5000`（741376 字节）。v0.5.2 实机已验证 PWM5 控制的 Wi-Fi 图标闪烁和常亮、PWM4 控制的手动红 X 测试。**真实 WAN 断开后自动点亮红 X 的完整场景仍待验证。** v0.6.0 新增的配置保存、开机自动连接、AP 自动关闭/恢复和系统统计也待实机验证。URL OTA、扫描、MQTT 和 Home Assistant 尚未实机核对。
+
+v0.5.2 实机长期运行时曾发生真实家庭 Wi-Fi Station 掉线：路由器显示设备离线，原 Station IP 无法访问。精确根因尚未确认。v0.6.1 增加常驻 Station supervisor、链路与 IP 防抖、运行期自动重连、递增退避、WLAN 状态缓存、运行期 WLAN 控制串行化，以及掉线后 Recovery AP 兜底恢复。**这些长期稳定性修复尚待真实 M1 soak test。**
 
 恢复热点名称由设备 Wi-Fi MAC 的最后 3 字节生成，格式为 **`OpenM1-XXXXXX`**，例如 MAC `34:EA:34:12:AB:CD` 对应 `OpenM1-12ABCD`。若 MAC 读取结果无效，则使用 `OpenM1-RECOVERY` 并输出故障日志。热点开放、无密码，地址固定为 `192.168.4.1/24`，DHCP Server 开启，HTTP 监听 TCP 80。**每次重启先启动恢复热点、HTTP 和 OTA；只有用户保存凭据并启用开机自动连接后，才会尝试连接家庭 Wi-Fi。** Wi-Fi 与 MQTT 密码保存在本机 MiCO 参数 Flash，未加密，不是保险库；GET API 与日志不返回密码。不要在不可信网络暴露此无认证管理界面。
 
@@ -21,7 +23,7 @@
 | `POST /api/ota/upload` | 原始 `.ota.bin` 文件流上传 |
 | `POST /api/ota/url` | 从设备可访问的 HTTP URL 下载 |
 | `POST /api/reboot` | 受控重启 |
-| `GET /api/wifi/status` | 恢复热点、STA 状态、SSID、IP、RSSI；不含密码 |
+| `GET /api/wifi/status` | 恢复热点、STA 状态、SSID、IP、RSSI 和连接稳定性计数；不含密码 |
 | `GET /api/wifi/settings` | 已保存 SSID、是否有凭据及两个开关；不含密码 |
 | `POST /api/wifi/settings` | 保存/清除开机 Wi-Fi 设置；只在用户提交时写参数 Flash |
 | `GET /api/system/stats` | 估算 CPU 负载、MiCO 堆信息和裸 Flash 分区元数据 |
@@ -44,7 +46,7 @@
 | `GET /api/network/health` | 独立于 MQTT 的 Station/IP/公共 TCP 探测与目标屏幕状态 |
 | `POST /api/display/network-test` | 仅允许 `blink`、`online`、`no_internet`、`auto` 四种固定模式；测试 5 秒后自动恢复 |
 
-SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结束符，对应 SDK 的 `wifi_ssid[32]` 和 `wifi_key[64]`。页面刷新后密码输入框为空；密码不会出现在日志、`/api/info` 或 `/api/wifi/status` 中。STA 连接由 4096 字节栈的独立线程执行，最多等待 30 秒。只有 `micoWlanGetLinkStatus().is_connected == 1` 且 `micoWlanGetIPStatus(..., Station)` 返回有效 IP 才认定连接成功。断开调用 `micoWlanSuspendStation()`，不会调用会停止两种接口的 `micoWlanSuspend()`。
+SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结束符，对应 SDK 的 `wifi_ssid[32]` 和 `wifi_key[64]`。页面刷新后密码输入框为空；密码不会出现在日志、`/api/info` 或 `/api/wifi/status` 中。STA 由 4096 字节栈的常驻 supervisor 线程管理，连接最多等待 30 秒，每秒采样链路与 IP；连续 2 次有效才认定连接成功，连接后连续 3 次异常才认定掉线。掉线后按 2、5、10、20、30 秒（上限 30 秒）退避重连。手动断开会暂停本次启动期间的自动重连，重启后仍遵循保存的开机自动连接配置。HTTP、MQTT、网络健康和 AP 策略只读 supervisor 的缓存状态；运行期的 Station 与 SoftAP 状态变更通过 WLAN 控制互斥锁串行化。断开仅使用 `micoWlanSuspendStation()`，不会调用会停止两种接口的 `micoWlanSuspend()`。
 
 ### AP+STA 源码依据与待测风险
 
@@ -84,7 +86,7 @@ Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置
 
 完整 MOC OTA 由 Kernel、填充到 `0x75000`、8 字节 APP 头、APP payload、末尾 16 字节 raw MD5 组成。上传或 URL 下载时使用 2048 字节静态缓冲流式写入 `MICO_PARTITION_OTA_TEMP`，然后从 Flash 回读长度、两份 APP CRC、payload CRC 和整个 OTA（不含尾部 MD5）的 MD5；另外计算 boot table 所需 CRC16。验证成功才调用 `mico_ota_switch_to_new_fw(total_size - 16, boot_crc16)`，发送 HTTP 成功响应，等待两秒后 `MicoSystemReboot()`。任一校验失败不写升级标志、不重启。最大 OTA 文件限制为分区实际长度与 `0xB5000` 两者较小值。
 
-`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.0 的亮度和网络健康状态已通过实机验证。**
+`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.1 的长期 Station 稳定性已通过实机验证。**
 
 ## 构建与验证
 
@@ -102,9 +104,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.6.0@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.6.1@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.6.0.bin
+  --app dist/OpenM1-v0.6.1.bin
 ```
 
-GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.0`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.0 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
+GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.1`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.1 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。

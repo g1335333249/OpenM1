@@ -1,8 +1,8 @@
 #pragma once
 #include "mico.h"
+#include "wifi_station_logic.h"
 #include <stddef.h>
 
-#define WIFI_STA_WORKER_STACK 4096
 #define WIFI_STA_CONNECT_TIMEOUT_MS 30000
 #define WIFI_STA_CONNECT_SUPPORTED 1
 #define WIFI_SCAN_SUPPORTED 1

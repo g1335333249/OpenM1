@@ -1,4 +1,4 @@
-# OpenM1 v0.6.0 MQTT
+# OpenM1 v0.6.1 MQTT
 
 本版使用固定 MiCO SDK `libraries/protocols/mqtt/` 的 `MQTTClientInit`、`MQTTConnect`、`MQTTPublish`、`MQTTYield` 与 MiCO TCP 传输。仅支持明文 TCP；默认端口 1883、发布周期 5 秒。MQTT 线程与 Recovery HTTP/OTA 分离，Broker 不可用时按 5、10、20、30 秒退避，最长 30 秒。开机不自动连接家庭 Wi-Fi；已保存且启用的 MQTT 配置会先等待手工建立 STA。
 
