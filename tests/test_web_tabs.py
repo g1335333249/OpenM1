@@ -51,6 +51,7 @@ assert '500,1000,2000' in source
 assert 'mqttFormInitialized' in source and 'haFormInitialized' in source
 assert "if($('mqtt-password').value)c.password=" in source
 for route in ('/api/wifi/scan', '/api/mqtt/status', '/api/homeassistant/status',
+              '/api/wifi/settings', '/api/system/stats',
               '/api/ota/upload', '/api/ota/url', '/api/uart/init', '/api/uart/raw',
               '/api/display/status', '/api/display/brightness',
               '/api/display/network-test', '/api/network/health'):
@@ -63,4 +64,8 @@ assert "$('display-brightness').addEventListener('input',showBrightnessLabel)" i
 assert "$('display-brightness').addEventListener('change',async()=>" in source
 assert '重新同步显示状态' in source
 assert '本版不会自动轮询' not in source
+assert 'wifiSettingsInitialized' in source and 'syncApOffControl' in source
+assert "if(activeTab==='system'&&now-lastTabTick>=3000)" in source
+assert "$('wifi-saved-password').value=''" in source
+assert 'password_nonempty' in source and 'Flash 存储' in source
 print('WEB_TABS_PASS: 7 tabs, hash, independent OTA polling, retained API and UTF-8')

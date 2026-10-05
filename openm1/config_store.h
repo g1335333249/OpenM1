@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #define OPENM1_CONFIG_MAGIC 0x314d504fu
-#define OPENM1_CONFIG_VERSION 2u
+#define OPENM1_CONFIG_VERSION 3u
 typedef struct {
     uint32_t magic;
     uint16_t version;
@@ -23,6 +23,11 @@ typedef struct {
     uint8_t brightness_level;
     uint8_t last_nonzero_brightness;
     uint8_t display_reserved[2];
+    char wifi_ssid[32];
+    char wifi_password[64];
+    uint8_t wifi_auto_connect;
+    uint8_t ap_disable_after_sta_connected;
+    uint8_t wifi_reserved[2];
 } openm1_config_t;
 
 void config_store_defaults(openm1_config_t *config);

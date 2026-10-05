@@ -302,7 +302,8 @@ void m1_display_status_json(char *out, size_t capacity)
              "\"display_worker_running\":%s,\"blink_phase\":\"%s\",\"network_test_active\":%s,\"last_pwm_result\":%d,"
              "\"pwm_frequency_hz\":%u,\"pwm_duty_percent\":20,\"wifi_blink_interval_ms\":%u,"
              "\"wifi_icon_protocol\":\"pwm\",\"wifi_icon_protocol_reverse_verified\":true,"
-             "\"wifi_icon_hardware_verified\":false}",
+             "\"wifi_icon_hardware_verified\":true,\"red_x_hardware_verified\":true,"
+             "\"no_internet_auto_red_x_hardware_verified\":false}",
              (unsigned)s.brightness_level,s.screen_on?"true":"false",
              (unsigned)s.last_nonzero_brightness,
              s.network_target==M1_NET_DISPLAY_ONLINE?"online":s.network_target==M1_NET_DISPLAY_NO_INTERNET?"no_internet":"blink",

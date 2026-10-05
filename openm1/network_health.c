@@ -142,7 +142,8 @@ void network_health_status_json(char *out,size_t capacity)
              "{\"wifi_link\":%s,\"has_ip\":%s,\"internet\":%s,\"state\":\"%s\","
              "\"probe_failures\":%u,\"last_probe_ms\":%lu,\"display_target\":\"%s\","
              "\"red_x_target\":%s,\"display_protocol\":\"pwm\","
-             "\"display_protocol_reverse_verified\":true,\"display_hardware_verified\":false}",
+             "\"display_protocol_reverse_verified\":true,\"display_hardware_verified\":true,"
+             "\"no_internet_auto_red_x_hardware_verified\":false}",
              link?"true":"false",ip[0]?"true":"false",
              snapshot.state==NETWORK_ONLINE?"true":"false",state_name(snapshot.state),
              (unsigned)snapshot.consecutive_failures,(unsigned long)snapshot.last_probe_ms,

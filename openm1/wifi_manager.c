@@ -1,10 +1,12 @@
 #include "wifi_manager.h"
 #include "recovery.h"
 #include "network_health.h"
+#include "config_store.h"
+#include "wifi_settings.h"
 #include <stdio.h>
 #include <string.h>
 
-/* Recovery is started before this module. No saved credentials are read at boot. */
+/* Recovery is started before this module; boot settings are applied later. */
 typedef struct {
     char state[16];
     char ssid[32];
@@ -22,7 +24,12 @@ static wifi_status_t status = { .state = "disconnected" };
 static network_InitTypeDef_st sta_config;
 static mico_mutex_t status_mutex;
 static mico_thread_t sta_thread;
+static mico_thread_t ap_policy_thread;
 static int manager_ready;
+static int recovery_ap_active;
+static int ap_policy_worker_ready;
+#define WIFI_AP_POLICY_STACK 2048u
+#define WIFI_AP_CLOSE_GRACE_MS 3000u
 typedef struct { char ssid[33]; int rssi; unsigned channel; wlan_sec_type_t security; } scan_ap_t;
 static scan_ap_t scan_aps[WIFI_SCAN_MAX_AP];
 static unsigned scan_count;
@@ -181,11 +188,128 @@ OSStatus wifi_manager_init(void)
     OSStatus err=mico_rtos_init_mutex(&status_mutex);
     if (err!=kNoErr) return err;
     manager_ready=1;
+    recovery_ap_active=1; /* main() has already started Recovery SoftAP. */
     err=mico_system_notify_register(mico_notify_WIFI_SCAN_ADV_COMPLETED,(void *)scan_complete,NULL);
     scan_registered=(err==kNoErr);
     if (!scan_registered) printf("WIFI: scan callback registration failed = %d\r\n",err);
     printf("WIFI: manager initialized\r\n");
     return kNoErr;
+}
+
+static OSStatus recovery_ap_start(void)
+{
+    network_InitTypeDef_st config;
+    memset(&config,0,sizeof(config));
+    config.wifi_mode=Soft_AP;
+    snprintf(config.wifi_ssid,sizeof(config.wifi_ssid),"%s",recovery_ssid());
+    memcpy(config.local_ip_addr,RECOVERY_IP,sizeof(RECOVERY_IP));
+    memcpy(config.net_mask,"255.255.255.0",sizeof("255.255.255.0"));
+    memcpy(config.gateway_ip_addr,RECOVERY_IP,sizeof(RECOVERY_IP));
+    memcpy(config.dnsServer_ip_addr,RECOVERY_IP,sizeof(RECOVERY_IP));
+    config.dhcpMode=DHCP_Server;
+    return StartNetwork(&config);
+}
+
+static int station_matches_saved(const char *saved_ssid)
+{
+    int match;
+    lock_status();
+    match=!status.active && !strcmp(status.state,"connected") &&
+          !strcmp(status.ssid,saved_ssid);
+    unlock_status();
+    return match;
+}
+
+static void ap_policy_worker(mico_thread_arg_t arg)
+{
+    uint32_t eligible_since=0;
+    openm1_config_t config;
+    OSStatus err;
+    int eligible,active;
+    (void)arg;
+    for (;;) {
+        config_store_get(&config);
+        eligible=wifi_ap_policy_can_close(&config,wifi_manager_station_ready(),
+                                         station_matches_saved(config.wifi_ssid),recovery_ota_busy());
+        lock_status(); active=recovery_ap_active; unlock_status();
+        if (!eligible) {
+            eligible_since=0;
+            /* During Station OTA keep a working Station connection untouched.
+             * If it has already failed, restore Recovery even while OTA is busy. */
+            if (!active && (!recovery_ota_busy() || !wifi_manager_station_ready())) {
+                err=recovery_ap_start();
+                if (err==kNoErr) {
+                    lock_status(); recovery_ap_active=1; unlock_status();
+                    printf("WIFI: Recovery AP restored after STA loss or policy change\r\n");
+                } else printf("WIFI: Recovery AP restore failed: %d\r\n",err);
+            }
+        } else if (active) {
+            uint32_t now=mico_rtos_get_time();
+            if (!eligible_since) {
+                eligible_since=now?now:1;
+                printf("WIFI: STA ready, Recovery AP will close in 3 seconds\r\n");
+            } else if (now-eligible_since>=WIFI_AP_CLOSE_GRACE_MS) {
+                config_store_get(&config);
+                if (wifi_ap_policy_can_close(&config,wifi_manager_station_ready(),
+                                             station_matches_saved(config.wifi_ssid),
+                                             recovery_ota_busy())) {
+                    err=micoWlanSuspendSoftAP();
+                    if (err==kNoErr) {
+                        lock_status(); recovery_ap_active=0; unlock_status();
+                        printf("WIFI: Recovery AP stopped after STA became ready\r\n");
+                    } else printf("WIFI: Recovery AP stop failed: %d\r\n",err);
+                }
+                eligible_since=0;
+            }
+        }
+        mico_thread_msleep(1000);
+    }
+}
+
+OSStatus wifi_manager_apply_boot_settings(void)
+{
+    openm1_config_t config;
+    OSStatus err;
+    if (!manager_ready) return kNotPreparedErr;
+    err=mico_rtos_create_thread(&ap_policy_thread,MICO_APPLICATION_PRIORITY,
+                               "openm1_ap_policy",ap_policy_worker,WIFI_AP_POLICY_STACK,0);
+    ap_policy_worker_ready=(err==kNoErr);
+    if (err!=kNoErr) {
+        printf("WIFI: AP policy worker unavailable: %d; Recovery AP stays on\r\n",err);
+    }
+    config_store_get(&config);
+    if (config.wifi_auto_connect && config.wifi_ssid[0]) {
+        printf("WIFI: auto-connect starting\r\nWIFI: auto-connect SSID = %s\r\n",config.wifi_ssid);
+        if (wifi_manager_connect(config.wifi_ssid,config.wifi_password)!=0)
+            printf("WIFI: auto-connect request failed; Recovery AP stays on\r\n");
+    }
+    memset(config.wifi_password,0,sizeof(config.wifi_password));
+    return err;
+}
+
+void wifi_manager_settings_json(char *out,size_t capacity)
+{
+    openm1_config_t config;
+    config_store_get(&config);
+    wifi_settings_json(&config,out,capacity);
+    memset(config.wifi_password,0,sizeof(config.wifi_password));
+}
+
+int wifi_manager_save_settings(const char *body,size_t length)
+{
+    openm1_config_t config;
+    OSStatus err;
+    int result;
+    if (recovery_ota_busy()) return -3;
+    config_store_get(&config);
+    result=wifi_settings_apply_json(body,length,&config);
+    if (result) { memset(config.wifi_password,0,sizeof(config.wifi_password)); return result; }
+    if (!ap_policy_worker_ready && config.ap_disable_after_sta_connected) {
+        memset(config.wifi_password,0,sizeof(config.wifi_password)); return -4;
+    }
+    err=config_store_save(&config);
+    memset(config.wifi_password,0,sizeof(config.wifi_password));
+    return err==kNoErr?0:-4;
 }
 int wifi_manager_connect(const char *ssid, const char *password)
 {
@@ -249,8 +373,9 @@ void wifi_manager_status_json(char *out, size_t out_size)
     IPStatusTypedef ap;
     LinkStatusTypeDef link;
     IPStatusTypedef ip;
-    char ssid[66],message[194];
-    int recovery_ap=0, linked=0;
+    char ssid[66],saved_ssid[66],message[194];
+    int recovery_ap=0, linked=0,ap_active;
+    openm1_config_t config;
     memset(&ap,0,sizeof(ap));
     if (micoWlanGetIPStatus(&ap,Soft_AP)==kNoErr) {
         ap.ip[sizeof(ap.ip)-1]=0;
@@ -276,13 +401,19 @@ void wifi_manager_status_json(char *out, size_t out_size)
         }
     }
     snapshot=status;
+    ap_active=recovery_ap_active;
     unlock_status();
+    recovery_ap=recovery_ap && ap_active;
+    config_store_get(&config);
     json_string(ssid,sizeof(ssid),snapshot.ssid);
+    json_string(saved_ssid,sizeof(saved_ssid),config.wifi_ssid);
     json_string(message,sizeof(message),snapshot.message);
     snprintf(out,out_size,
-      "{\"recovery_ap\":%s,\"recovery_ssid\":\"%s\",\"mac\":\"%s\",\"sta_state\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"gateway\":\"%s\",\"netmask\":\"%s\",\"dns\":\"%s\",\"rssi\":%d,\"message\":\"%s\",\"sta_connect_supported\":true,\"scan_supported\":%s}",
-      recovery_ap?"true":"false",recovery_ssid(),recovery_mac(),snapshot.state,ssid,snapshot.ip,snapshot.gateway,
-      snapshot.netmask,snapshot.dns,snapshot.rssi,message,scan_registered?"true":"false");
+      "{\"recovery_ap\":%s,\"recovery_ap_state\":\"%s\",\"recovery_ssid\":\"%s\",\"mac\":\"%s\",\"sta_state\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"gateway\":\"%s\",\"netmask\":\"%s\",\"dns\":\"%s\",\"rssi\":%d,\"message\":\"%s\",\"sta_connect_supported\":true,\"scan_supported\":%s,\"auto_connect\":%s,\"ap_disable_after_connect\":%s,\"saved_ssid\":\"%s\"}",
+      recovery_ap?"true":"false",recovery_ap?"on":"off",recovery_ssid(),recovery_mac(),snapshot.state,ssid,snapshot.ip,snapshot.gateway,
+      snapshot.netmask,snapshot.dns,snapshot.rssi,message,scan_registered?"true":"false",
+      config.wifi_auto_connect?"true":"false",config.ap_disable_after_sta_connected?"true":"false",saved_ssid);
+    memset(config.wifi_password,0,sizeof(config.wifi_password));
 }
 static const char *security_name(wlan_sec_type_t security)
 {

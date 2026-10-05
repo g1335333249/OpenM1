@@ -39,4 +39,6 @@ arm-none-eabi-objdump -D -b binary -m arm -M force-thumb \
 
 **高可信疑因**是 v0.5.1 的 150 ms RTOS timer callback 中调用互斥锁与 PWM HAL。这些日志尚不能单独证明异常精确发生于哪条指令。v0.5.2 删除网络显示 RTOS timer，由独立普通线程作为 PWM5/PWM4 Start/Stop 的唯一执行者；HAL 调用时不持有显示互斥锁。PWM 通道、50 kHz、20% 和 150 ms 相位均保持不变，Kernel 仍为 `3080B002.023`。
 
-Manifest 中 `wifi_icon_pwm_carrier_hardware_verified=true`；**完整闪烁/常亮、红 X 与 v0.5.2 Recovery 稳定性仍待真实 M1 验证**，因此 `wifi_icon_hardware_verified=false`、`red_x_hardware_verified=false`。
+## v0.5.2 实机验证
+
+真实 M1 已确认：未连接家庭 Wi-Fi 时 Wi-Fi 图标正常闪烁；连接家庭 Wi-Fi 后图标常亮；诊断页“测试红 X”使实体红 X 亮起。因此 PWM5 与 Wi-Fi 图标、PWM4 与红 X 的硬件映射，以及上述闪烁、常亮和手工测试效果均为实机验证。`wifi_icon_hardware_verified=true`、`red_x_hardware_verified=true`。真实 WAN 断开后由 `network_health` 自动触发红 X 的完整业务链尚未实机验证，单独标记 `no_internet_auto_red_x_hardware_verified=false`。

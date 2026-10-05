@@ -18,6 +18,17 @@ typedef struct {
     uint8_t mqtt_enabled,ha_enabled,reserved[2];
 } openm1_config_v1_t;
 
+/* Exact v0.5.2 layout. Keep this prefix unchanged when extending v3. */
+typedef struct {
+    uint32_t magic;
+    uint16_t version,size;
+    uint32_t crc32;
+    char host[129],username[65],password[129],client_id[65],base_topic[129],discovery_prefix[65];
+    uint16_t port,publish_interval;
+    uint8_t mqtt_enabled,ha_enabled,reserved[2];
+    uint8_t brightness_level,last_nonzero_brightness,display_reserved[2];
+} openm1_config_v2_t;
+
 static uint32_t crc32_bytes(const void *data, size_t length)
 {
     const uint8_t *bytes=(const uint8_t *)data;
@@ -64,7 +75,22 @@ static int config_valid(const openm1_config_t *config)
            config->discovery_prefix[64]==0 && config->port>0 &&
            config->publish_interval>=2 && config->publish_interval<=300 &&
            config->brightness_level<=4 && config->last_nonzero_brightness>=1 &&
-           config->last_nonzero_brightness<=4;
+           config->last_nonzero_brightness<=4 &&
+           config->wifi_ssid[31]==0 && config->wifi_password[63]==0 &&
+           config->wifi_auto_connect<=1 && config->ap_disable_after_sta_connected<=1 &&
+           (!config->ap_disable_after_sta_connected ||
+            (config->wifi_auto_connect && config->wifi_ssid[0]));
+}
+static int config_v2_valid(const openm1_config_v2_t *old)
+{
+    return old->magic==OPENM1_CONFIG_MAGIC && old->version==2 &&
+           old->size==sizeof(*old) && old->crc32==crc32_bytes(old,sizeof(*old)) &&
+           old->host[128]==0 && old->username[64]==0 && old->password[128]==0 &&
+           old->client_id[64]==0 && old->base_topic[128]==0 &&
+           old->discovery_prefix[64]==0 && old->port>0 &&
+           old->publish_interval>=2 && old->publish_interval<=300 &&
+           old->brightness_level<=4 && old->last_nonzero_brightness>=1 &&
+           old->last_nonzero_brightness<=4;
 }
 static int config_v1_valid(const openm1_config_v1_t *old)
 {
@@ -85,6 +111,12 @@ OSStatus config_store_init(void)
     if (err!=kNoErr) return err;
     if (config_valid(saved) && !(saved->host[0]==0 &&
         !strcmp(saved->client_id,RECOVERY_FALLBACK_SSID))) config_cache=*saved;
+    else if (config_v2_valid((const openm1_config_v2_t *)saved)) {
+        config_store_defaults(&config_cache);
+        memcpy(&config_cache,saved,sizeof(openm1_config_v2_t));
+        migrate=1;
+        printf("CONFIG: migrating v2 MQTT/HA/brightness settings to v3\r\n");
+    }
     else if (config_v1_valid((const openm1_config_v1_t *)saved)) {
         config_store_defaults(&config_cache);
         /* Preserve every v0.4.1 MQTT and HA byte; only append display fields. */
@@ -92,7 +124,7 @@ OSStatus config_store_init(void)
         config_cache.brightness_level=4;
         config_cache.last_nonzero_brightness=4;
         migrate=1;
-        printf("CONFIG: migrating v1 MQTT/HA settings to v2\r\n");
+        printf("CONFIG: migrating v1 MQTT/HA settings to v3\r\n");
     }
     else {
         config_store_defaults(&config_cache);

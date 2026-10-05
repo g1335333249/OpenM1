@@ -7,6 +7,7 @@
 #include "mqtt_manager.h"
 #include "m1_display.h"
 #include "network_health.h"
+#include "system_stats.h"
 
 int main(void)
 {
@@ -22,7 +23,7 @@ int main(void)
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.5.2\r\n"
+           "Version: 0.6.0\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -98,6 +99,10 @@ int main(void)
                 printf("SENSOR: UART diagnostic initialization failed; Recovery remains active\r\n");
             if (network_health_init()!=kNoErr)
                 printf("NETWORK: health monitor unavailable; Recovery remains active\r\n");
+            if (wifi_manager_apply_boot_settings()!=kNoErr)
+                printf("WIFI: boot policy unavailable; Recovery remains active\r\n");
+            if (system_stats_init()!=kNoErr)
+                printf("STATS: sampler unavailable; Recovery remains active\r\n");
             if (mqtt_manager_init()!=kNoErr)
                 printf("MQTT: manager initialization failed; Recovery remains active\r\n");
         }

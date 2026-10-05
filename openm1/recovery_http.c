@@ -6,6 +6,7 @@
 #include "json_min.h"
 #include "m1_display.h"
 #include "network_health.h"
+#include "system_stats.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -192,6 +193,10 @@ static void handle_client(int fd)
             wifi_manager_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/wifi/scan")) {
             recovery_send_json(fd,200,wifi_manager_scan_json());
+        } else if (!strcmp(path,"/api/wifi/settings")) {
+            wifi_manager_settings_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/system/stats")) {
+            system_stats_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/mqtt/status")) {
             mqtt_manager_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/homeassistant/status")) {
@@ -202,7 +207,7 @@ static void handle_client(int fd)
             network_health_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.5.2\",\"version\":\"0.5.2\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.0\",\"version\":\"0.6.0\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -215,6 +220,21 @@ static void handle_client(int fd)
         goto done;
     }
     if (strcmp(method,"POST")) { recovery_send_json(fd,405,"{\"message\":\"Method not allowed\"}"); goto done; }
+    if (!strcmp(path,"/api/wifi/settings")) {
+        static char body[513];
+        int result;
+        if (!seen || !read_small_body(fd,request,body_start,body_len,length,body,sizeof(body))) {
+            recovery_send_json(fd,400,"{\"error\":\"Wi-Fi 设置请求无效\"}"); goto done;
+        }
+        result=wifi_manager_save_settings(body,length);
+        memset(body,0,sizeof(body));
+        if (result==0) recovery_send_json(fd,200,"{\"ok\":true}");
+        else if (result==-2) recovery_send_json(fd,409,"{\"error\":\"必须先启用开机自动连接 Wi-Fi，才能设置连接成功后关闭 AP\"}");
+        else if (result==-3) recovery_send_json(fd,409,"{\"error\":\"固件升级期间不能保存 Wi-Fi 设置\"}");
+        else if (result==-4) recovery_send_json(fd,503,"{\"error\":\"配置存储或 AP 策略暂不可用\"}");
+        else recovery_send_json(fd,400,"{\"error\":\"Wi-Fi 设置字段格式无效\"}");
+        goto done;
+    }
     if (!strcmp(path,"/api/display/network-test")) {
         char body[65]; json_min_field_t field[1]; int parsed,result;
         if (!seen || !read_small_body(fd,request,body_start,body_len,length,body,sizeof(body))) {

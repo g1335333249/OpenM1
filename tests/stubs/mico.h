@@ -6,6 +6,7 @@ typedef int mico_thread_t;
 typedef void *mico_thread_arg_t;
 typedef void (*mico_thread_function_t)(mico_thread_arg_t);
 typedef struct { int placeholder; } mico_Context_t;
+typedef struct { int num_of_chunks,total_memory,allocted_memory,free_memory; } micoMemInfo_t;
 typedef void (*timer_handler_t)(void *);
 typedef struct { void *handle; timer_handler_t function; void *arg; } mico_timer_t;
 #define kNoErr 0
@@ -13,6 +14,7 @@ typedef struct { void *handle; timer_handler_t function; void *arg; } mico_timer
 #define kParamErr (-2)
 #define MICO_APPLICATION_PRIORITY 5
 OSStatus mico_rtos_init_mutex(mico_mutex_t *mutex);
+micoMemInfo_t *MicoGetMemoryInfo(void);
 OSStatus mico_rtos_lock_mutex(mico_mutex_t *mutex);
 OSStatus mico_rtos_unlock_mutex(mico_mutex_t *mutex);
 uint32_t mico_rtos_get_time(void);
