@@ -10,6 +10,9 @@
 #include "network_health.h"
 #include "system_stats.h"
 
+/* Implemented by the pinned SDK's MiCO/net/mocIP/mico/mico_socket.c. */
+extern char *sethostname(char *name);
+
 static int boot_free_heap(void)
 {
     micoMemInfo_t *memory=MicoGetMemoryInfo();
@@ -70,11 +73,12 @@ int main(void)
     char mac_text[18] = {0};
     OSStatus result,ap_result,http_result,wifi_result;
     unsigned attempt;
+    int mac_valid;
     static const unsigned retry_delay_ms[] = {500u,1000u};
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.4\r\n"
+           "Version: 0.6.5\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -108,9 +112,10 @@ int main(void)
 
     /* The MOC wrapper returns void. Reject clearly invalid/uninitialized MACs. */
     mico_wlan_get_mac_address(mac);
-    if (memcmp(mac, "\0\0\0\0\0\0", sizeof(mac)) != 0 &&
+    mac_valid=memcmp(mac, "\0\0\0\0\0\0", sizeof(mac)) != 0 &&
         memcmp(mac, "\xff\xff\xff\xff\xff\xff", sizeof(mac)) != 0 &&
-        (mac[0] & 1u) == 0) {
+        (mac[0] & 1u) == 0;
+    if (mac_valid) {
         snprintf(recovery_ssid, sizeof(recovery_ssid), "OpenM1-%02X%02X%02X",
                  mac[3], mac[4], mac[5]);
         snprintf(mac_text, sizeof(mac_text), "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -120,6 +125,11 @@ int main(void)
         printf("RECOVERY: MAC read failed, using fallback SSID\r\n");
     }
     recovery_set_identity(recovery_ssid, mac_text);
+    recovery_prepare_hostname(mac,mac_valid);
+    if (sethostname(recovery_hostname()))
+        printf("DEVICE: DHCP hostname = %s\r\n",recovery_hostname());
+    else
+        printf("DEVICE: DHCP hostname setup unavailable\r\n");
     printf("RECOVERY: SSID = %s\r\n", recovery_ssid);
 
     printf("RECOVERY: starting SoftAP\r\n");

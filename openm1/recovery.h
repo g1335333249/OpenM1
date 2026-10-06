@@ -15,6 +15,8 @@ const char *recovery_rf(void);
 void recovery_set_identity(const char *ssid, const char *mac);
 const char *recovery_ssid(void);
 const char *recovery_mac(void);
+void recovery_prepare_hostname(const uint8_t mac[6], int mac_valid);
+char *recovery_hostname(void);
 OSStatus recovery_http_start(void);
 int recovery_http_ready(void);
 void recovery_ota_partition_log(void);

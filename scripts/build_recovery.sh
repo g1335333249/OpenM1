@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.4
+PREFIX=OpenM1-v0.6.5
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 TOOL=.micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/Linux64/bin
 [[ "$(git -C mico-os rev-parse HEAD)" == "$SDK_COMMIT" ]]
@@ -13,6 +13,9 @@ python3 tests/test_web_tabs.py
 python3 tests/test_v063_static.py
 python3 tests/test_v063_safety.py
 python3 tests/test_v064_static.py
+python3 tests/test_v065_hostname_static.py
+cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_recovery_hostname.c openm1/recovery_identity.c -o /tmp/openm1-hostname-test
+/tmp/openm1-hostname-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_sensor.c openm1/m1_sensor.c -o /tmp/openm1-sensor-test
 /tmp/openm1-sensor-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_display.c openm1/m1_display_network.c -o /tmp/openm1-display-test
@@ -59,7 +62,7 @@ python3 tools/verify_app.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-n
 mkdir -p dist/stack-usage
 find build/openm1@MK3080B@moc -type f -name '*.su' -path '*/openm1/*' -exec cp {} dist/stack-usage/ \;
 python3 tools/check_stack_budget.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --su-dir dist/stack-usage --output dist/stack-budget.txt
-for symbol in recovery_http_server_thread recovery_ota_upload_handler recovery_ota_url_handler recovery_ota_verify_flash wifi_manager_init wifi_manager_connect wifi_manager_disconnect wifi_manager_status_json recovery_set_identity recovery_ssid recovery_mac wlan_get_mac_address mico_ota_switch_to_new_fw; do
+for symbol in recovery_http_server_thread recovery_ota_upload_handler recovery_ota_url_handler recovery_ota_verify_flash wifi_manager_init wifi_manager_connect wifi_manager_disconnect wifi_manager_status_json recovery_set_identity recovery_ssid recovery_mac recovery_hostname recovery_prepare_hostname sethostname wlan_get_mac_address mico_ota_switch_to_new_fw; do
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done

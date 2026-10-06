@@ -21,7 +21,7 @@ symbols_valid = all(f'PASS {symbol}' in header for symbol in ('user_handler','mo
 sdk_valid = Path('mico-os').is_dir() and __import__('subprocess').check_output(['git','-C','mico-os','rev-parse','HEAD'], text=True).strip() == SDK_COMMIT
 kernel = require_sdk_kernel(a.sdk_kernel)
 valid = all(checks.values()) and header_valid and symbols_valid and sdk_valid and '5.4.1' in a.toolchain
-data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.4','board':'MK3080B','sdk_commit':SDK_COMMIT,
+data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.5','board':'MK3080B','sdk_commit':SDK_COMMIT,
         'kernel':'3080B002.023','kernel_version':'3080B002.023','sdk_kernel_version':'3080B002.023',
         'kernel_source':'mico-os/resources/moc_kernel/3080B/kernel.bin',
         'kernel_sha256':hashlib.sha256(kernel).hexdigest(),'interface_version':3,
@@ -32,6 +32,10 @@ data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.4','board':'MK3080B',
         'main_verified_on_hardware':True,
         'runtime_verified_on_hardware':True,
         'wifi_init_fix':'MicoInit before micoWlanPowerOn',
+        'dhcp_hostname_format':'OpenM1-XXXXXX',
+        'dhcp_hostname_source':'MAC last three bytes',
+        'dhcp_hostname_fallback':'OpenM1',
+        'dhcp_hostname_verified_on_hardware':False,
         'wifi_verified_on_hardware':True,
         'softap_verified_on_hardware':True,
         'http_verified_on_hardware':True,
