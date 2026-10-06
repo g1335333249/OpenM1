@@ -30,6 +30,9 @@ init=stats.split('OSStatus system_stats_init(void)',1)[1].split('void system_sta
 assert 'mico_rtos_create_thread' not in init
 assert 'boot_min_free_bytes' in stats and 'runtime_min_free_bytes' in stats
 assert 'low_memory_safe_mode' in stats and 'boot_stable' in stats and 'stack_overflow_count' in stats
+heap_observer=stats.split('void system_stats_note_heap(',1)[1].split('static int begin_thread_creation',1)[0]
+assert 'free_bytes<(int)OPENM1_MIN_HEAP_RESERVE' in heap_observer
+assert 'boot_sample && free_bytes' not in heap_observer
 mqtt_init=mqtt.split('OSStatus mqtt_manager_init(void)',1)[1].split('void mqtt_manager_maybe_start',1)[0]
 assert 'mico_rtos_create_thread' not in mqtt_init
 assert 'config.mqtt_enabled' in mqtt_init

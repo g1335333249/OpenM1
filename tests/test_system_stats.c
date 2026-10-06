@@ -52,5 +52,11 @@ int main(void)
     mem.free_memory++;
     assert(system_stats_begin_ota_thread(RECOVERY_OTA_STACK));
     system_stats_end_thread_creation();
+    mem.free_memory=OPENM1_MIN_HEAP_RESERVE-1;
+    system_stats_note_heap(0); /* Runtime low heap also enters safe mode. */
+    assert(system_stats_low_memory_safe_mode());
+    assert(!system_stats_begin_optional_thread(SYSTEM_STATS_CPU_STACK));
+    system_stats_json(out,sizeof(out));
+    assert(strstr(out,"\"boot_phase\":\"safe_mode\""));
     return 0;
 }

@@ -39,7 +39,10 @@ void system_stats_note_heap(int boot_sample)
     if (!runtime_min_free_heap || free_bytes<runtime_min_free_heap) runtime_min_free_heap=free_bytes;
     if (boot_sample && (!boot_min_free_heap || free_bytes<boot_min_free_heap))
         boot_min_free_heap=free_bytes;
-    if (boot_sample && free_bytes<(int)OPENM1_MIN_HEAP_RESERVE) low_memory_safe_mode=1;
+    if (free_bytes<(int)OPENM1_MIN_HEAP_RESERVE) {
+        low_memory_safe_mode=1;
+        snprintf(boot_phase,sizeof(boot_phase),"safe_mode");
+    }
     if (stats_ready) mico_rtos_unlock_mutex(&stats_mutex);
 }
 static int begin_thread_creation(unsigned stack_bytes,unsigned reserve,int optional)
