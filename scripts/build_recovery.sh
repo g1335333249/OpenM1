@@ -56,7 +56,7 @@ cp build.log dist/build.log
 echo '[PASS] MK3080B@moc build'
 python3 tools/verify_app.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --objdump "$TOOL/arm-none-eabi-objdump" --symbols dist/symbols.txt --report dist/app-header-report.txt
 mkdir -p dist/stack-usage
-cp build/openm1@MK3080B@moc/modules/openm1/*.su dist/stack-usage/
+find build/openm1@MK3080B@moc -type f -name '*.su' -path '*/openm1/*' -exec cp {} dist/stack-usage/ \;
 python3 tools/check_stack_budget.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --su-dir dist/stack-usage --output dist/stack-budget.txt
 for symbol in recovery_http_server_thread recovery_ota_upload_handler recovery_ota_url_handler recovery_ota_verify_flash wifi_manager_init wifi_manager_connect wifi_manager_disconnect wifi_manager_status_json recovery_set_identity recovery_ssid recovery_mac wlan_get_mac_address mico_ota_switch_to_new_fw; do
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
