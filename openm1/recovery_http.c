@@ -163,7 +163,7 @@ static void handle_client(int fd)
 {
     /* This server processes one client at a time. Keep the large HTTP buffers
      * out of its 6 KiB thread stack, including during nested config writes. */
-    static char request[2049], json[2048], url[512];
+    static char request[2049], json[2304], url[512];
     char method[8], path[80];
     size_t used=0,body_len=0; uint32_t length=0;
     int n,seen=0,body_start=-1;
@@ -293,6 +293,7 @@ static void handle_client(int fd)
         int result=mqtt_manager_start();
         if (!result) recovery_send_json(fd,202,"{\"ok\":true,\"message\":\"MQTT 服务正在启动。\"}");
         else if (result==-2) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"请先配置 MQTT 服务器。\"}");
+        else if (result==-4) recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"内存不足，MQTT 已延迟启动；Recovery 与 OTA 保持可用。\"}");
         else recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"MQTT 服务暂不可用。\"}");
         goto done;
     }
@@ -423,13 +424,21 @@ static void handle_client(int fd)
                 recovery_send_json(fd,400,"{\"message\":\"暂不支持 HTTPS。\"}"); goto done;
             }
             if (strncmp(url,"http://",7)) { recovery_send_json(fd,400,"{\"message\":\"HTTP URL required\"}"); goto done; }
-            if (!recovery_ota_begin(fd,1,0,(uint8_t*)url,strlen(url))) {
-                recovery_send_json(fd,409,"{\"message\":\"OTA worker unavailable\"}"); goto done;
+            { int ota_result=recovery_ota_begin(fd,1,0,(uint8_t*)url,strlen(url));
+              if (ota_result<=0) {
+                recovery_send_json(fd,ota_result==-2?503:409,ota_result==-2?
+                    "{\"ok\":false,\"message\":\"Insufficient free memory for safe OTA\"}":
+                    "{\"message\":\"OTA worker unavailable\"}"); goto done;
+              }
             }
         } else {
             if (body_len>length) { recovery_send_json(fd,400,"{\"message\":\"Body exceeds Content-Length\"}"); goto done; }
-            if (!recovery_ota_begin(fd,0,length,(uint8_t*)request+body_start,body_len)) {
-                recovery_send_json(fd,409,"{\"message\":\"OTA worker unavailable\"}"); goto done;
+            { int ota_result=recovery_ota_begin(fd,0,length,(uint8_t*)request+body_start,body_len);
+              if (ota_result<=0) {
+                recovery_send_json(fd,ota_result==-2?503:409,ota_result==-2?
+                    "{\"ok\":false,\"message\":\"Insufficient free memory for safe OTA\"}":
+                    "{\"message\":\"OTA worker unavailable\"}"); goto done;
+              }
             }
         }
         return; /* OTA worker owns fd and responds after verification. */

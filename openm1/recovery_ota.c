@@ -1,4 +1,5 @@
 #include "recovery.h"
+#include "system_stats.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -313,8 +314,10 @@ int recovery_ota_begin(int fd, int is_url, uint32_t length, const uint8_t *initi
 {
     OSStatus result;
     if (initial_len>sizeof(job.initial) || (is_url && initial_len>URL_LIMIT)) return 0;
+    if (!system_stats_begin_ota_thread(RECOVERY_OTA_STACK))
+        return -2;
     lock_status();
-    if (status.active) { unlock_status(); return 0; }
+    if (status.active) { unlock_status(); system_stats_end_thread_creation(); return 0; }
     status.active=1; status.state=is_url?"downloading":"uploading";
     status.received=0; status.total=is_url?0:length;
     status.message[0]=0;
@@ -325,6 +328,7 @@ int recovery_ota_begin(int fd, int is_url, uint32_t length, const uint8_t *initi
     if (initial_len) memcpy(job.initial,initial,initial_len);
     result=mico_rtos_create_thread(&ota_thread,MICO_APPLICATION_PRIORITY,"openm1_ota",
             is_url?recovery_ota_url_handler:recovery_ota_upload_handler,RECOVERY_OTA_STACK,0);
+    system_stats_end_thread_creation();
     if (result!=kNoErr) { fail("OTA worker start failed"); lock_status(); status.active=0; unlock_status(); return 0; }
     return 1;
 }

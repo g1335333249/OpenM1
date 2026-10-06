@@ -9,6 +9,9 @@
 #define WIFI_STATION_LOSS_THRESHOLD 3u
 #define WIFI_STATION_READY_THRESHOLD 2u
 #define WIFI_BOOT_AUTO_CONNECT_GRACE_MS 2000u
+#define WIFI_AP_BOOT_FAILSAFE_MS 120000u
+#define WIFI_AP_STABLE_BEFORE_CLOSE_MS 30000u
+#define WIFI_AP_CLOSE_RETRY_MS 30000u
 
 typedef enum { WIFI_DESIRED_NONE, WIFI_DESIRED_MANUAL, WIFI_DESIRED_AUTO } wifi_desired_source_t;
 typedef enum {
@@ -31,6 +34,7 @@ uint32_t wifi_ap_restore_backoff_ms(unsigned failure_index);
 int wifi_station_rearm_due(uint32_t now,uint32_t wait_since,uint32_t last_rearm);
 int wifi_ap_close_eligible(int auto_connect,int disable_after_connect,
                            int station_ready,int ssid_match,int ota_busy);
+int wifi_ap_close_timing_ready(uint32_t now,uint32_t ready_since,uint32_t next_close_ms);
 void wifi_station_desire(wifi_station_desired_t *desired,const char *ssid,
                          const char *password,wifi_desired_source_t source);
 void wifi_station_manual_disconnect(wifi_station_desired_t *desired);

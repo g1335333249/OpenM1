@@ -21,3 +21,4 @@ int wifi_manager_station_ready(void);
 int wifi_manager_station_link(void);
 int wifi_manager_station_rssi(void);
 void wifi_manager_station_ip(char out[16]);
+int wifi_manager_control_running(void);

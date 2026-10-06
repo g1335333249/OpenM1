@@ -35,6 +35,12 @@ int wifi_ap_close_eligible(int auto_connect,int disable_after_connect,
 {
     return auto_connect && disable_after_connect && station_ready && ssid_match && !ota_busy;
 }
+int wifi_ap_close_timing_ready(uint32_t now,uint32_t ready_since,uint32_t next_close_ms)
+{
+    return ready_since && now>=WIFI_AP_BOOT_FAILSAFE_MS &&
+           (uint32_t)(now-ready_since)>=WIFI_AP_STABLE_BEFORE_CLOSE_MS &&
+           (!next_close_ms || (int32_t)(now-next_close_ms)>=0);
+}
 void wifi_station_desire(wifi_station_desired_t *desired,const char *ssid,
                          const char *password,wifi_desired_source_t source)
 {

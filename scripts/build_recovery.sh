@@ -11,6 +11,7 @@ echo '[PASS] SDK commit'
 python3 tools/embed_page.py --check
 python3 tests/test_web_tabs.py
 python3 tests/test_v063_static.py
+python3 tests/test_v063_safety.py
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_sensor.c openm1/m1_sensor.c -o /tmp/openm1-sensor-test
 /tmp/openm1-sensor-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_display.c openm1/m1_display_network.c -o /tmp/openm1-display-test
@@ -54,6 +55,9 @@ cp "$APP_MAP" "dist/$PREFIX.map"
 cp build.log dist/build.log
 echo '[PASS] MK3080B@moc build'
 python3 tools/verify_app.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --objdump "$TOOL/arm-none-eabi-objdump" --symbols dist/symbols.txt --report dist/app-header-report.txt
+mkdir -p dist/stack-usage
+cp build/openm1@MK3080B@moc/modules/openm1/*.su dist/stack-usage/
+python3 tools/check_stack_budget.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --su-dir dist/stack-usage --output dist/stack-budget.txt
 for symbol in recovery_http_server_thread recovery_ota_upload_handler recovery_ota_url_handler recovery_ota_verify_flash wifi_manager_init wifi_manager_connect wifi_manager_disconnect wifi_manager_status_json recovery_set_identity recovery_ssid recovery_mac wlan_get_mac_address mico_ota_switch_to_new_fw; do
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"

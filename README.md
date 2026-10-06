@@ -12,6 +12,8 @@ v0.6.1 第一次刷入运行正常；断电冷启动后，实体 Wi-Fi 图标不
 
 v0.6.3 将 Station 控制、扫描和 Recovery AP 策略合并进一个 5120 字节栈的普通 `wifi_control_worker`；HTTP、MQTT 与网络健康只读其缓存。显示初始化先于 Wi-Fi 控制线程，开机自动连接保留 2 秒稳定期。固定 SDK 的 `mico_wlan.h` 说明 Station 成功连接后掉线会按 `wifi_retry_interval` 在后台重连；OpenM1 显式设置为 **5000 ms**，持续观察 **60 秒**，届时仍未恢复才每至少 60 秒进行一次受控 Station 重置。Recovery AP 由同一线程每秒探测与自愈。**冷启动、运行期重连和长期运行仍待真实 M1 验证。**
 
+启动期只创建 Recovery HTTP、显示、UART 与唯一 Wi-Fi control 线程。Network Health 延迟到 Wi-Fi control 正常运行且 Station 就绪后启动；CPU sampler 至少等待 30 秒，MQTT 仅在启用且 Station 就绪或用户手动启动时创建。关键服务启动后堆不足 8192 字节，或 Wi-Fi control 不可用时进入 Recovery 安全模式，不启动这些可选 worker，也不自动重启。OTA worker 创建前要求空闲堆大于 5120 字节栈加 4096 字节安全余量；不足时 HTTP 503。`/api/system/stats` 报告启动期/运行期最低空闲堆、阶段、安全模式与栈溢出通知计数。Wi-Fi 故障通知只计数，由唯一控制线程处理 WLAN HAL。GCC `-fstack-usage` 和 ELF 堆区域预算是辅助静态检查，不能替代实机栈/堆观测。
+
 恢复热点名称由设备 Wi-Fi MAC 的最后 3 字节生成，格式为 **`OpenM1-XXXXXX`**，例如 MAC `34:EA:34:12:AB:CD` 对应 `OpenM1-12ABCD`。若 MAC 读取结果无效，则使用 `OpenM1-RECOVERY` 并输出故障日志。热点开放、无密码，地址固定为 `192.168.4.1/24`，DHCP Server 开启，HTTP 监听 TCP 80。**每次重启先启动恢复热点、HTTP 和 OTA；只有用户保存凭据并启用开机自动连接后，才会尝试连接家庭 Wi-Fi。** Wi-Fi 与 MQTT 密码保存在本机 MiCO 参数 Flash，未加密，不是保险库；GET API 与日志不返回密码。不要在不可信网络暴露此无认证管理界面。
 
 ## 页面与接口
@@ -54,7 +56,7 @@ SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结�
 
 ### AP+STA 源码依据与待测风险
 
-固定 SDK 的 `include/mico_wlan.h` 在 `micoWlanStart()` 注释中说明建立 Station+SoftAP 共存时调用两次。`platform/MCU/MX1290/moc/moc_api.c` 将 `StartNetwork()` 转发至 MOC 的 `micoWlanStart`。原有 SoftAP 启动和手动 STA 调用顺序保持不变；用户已在真实 M1 上验证 AP+STA 可工作。新开机策略先启动 Recovery，再读取配置并复用现有 STA 连接路径。仅在自动连接已启用、已保存 SSID 与当前 STA 一致、Station 有有效 IP、没有 OTA 且持续稳定约 3 秒时，才通过 `micoWlanSuspendSoftAP()` 关闭 AP；STA 失联或策略关闭后，后台检查会用相同 SSID/IP/DHCP 配置重新启动 Recovery AP。此策略仍待实机验证。
+固定 SDK 的 `include/mico_wlan.h` 在 `micoWlanStart()` 注释中说明建立 Station+SoftAP 共存时调用两次。`platform/MCU/MX1290/moc/moc_api.c` 将 `StartNetwork()` 转发至 MOC 的 `micoWlanStart`。原有 SoftAP 启动和手动 STA 调用顺序保持不变；用户已在真实 M1 上验证 AP+STA 可工作。新开机策略先启动 Recovery，再读取配置并复用现有 STA 连接路径。仅在自动连接已启用、已保存 SSID 与当前 STA 一致、开机至少 120 秒、Station 链路和 IP 连续稳定至少 30 秒、没有 OTA，且关闭前再次确认链路与 IP 有效时，才通过 `micoWlanSuspendSoftAP()` 关闭 AP；STA 失联或策略关闭后，后台检查会用相同 SSID/IP/DHCP 配置重新启动 Recovery AP。此策略仍待实机验证。
 
 普通 `ScanResult` 只有 SSID/RSSI；本版用固定 SDK 的 `micoWlanStartScanAdv()` 和 `mico_notify_WIFI_SCAN_ADV_COMPLETED`，取得 `ScanResult_adv` 的信道及安全类型。扫描由唯一 Wi-Fi 控制线程发起，回调只保存最多 20 个 AP，同 SSID 留最强记录，按 RSSI 排序；15 秒未回调则标记失败。不调用完整 `mico_system_init()`，也不主动停止恢复热点。**扫描期间热点和 HTTP 是否持续可用必须实机核对；失败时仍可手工输入 SSID。**
 
@@ -62,7 +64,7 @@ SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结�
 
 `POST /api/wifi/settings` 可提交 `{"ssid":"MyWiFi","password":"12345678","auto_connect":true,"disable_ap_after_connect":false}`。密码字段省略且 SSID 不变时保留原密码；改变 SSID 必须显式提交密码，开放网络用 `"password":""`。仅提交 `{"auto_connect":false}` 会同时清除自动关闭 AP 标记；`{"clear_saved_wifi":true}` 清除全部保存的 Wi-Fi 设置，但不断开当前 Station。未启用自动连接却要求关闭 AP 时返回 HTTP 409。`GET /api/wifi/settings` 只返回保存的 SSID、`credential_saved`、`password_nonempty` 和两个开关。
 
-系统 Tab 每 3 秒读取 `/api/system/stats`。CPU 为优先级 8 的普通线程每 5 秒进行 100 ms 低优先级计数采样，是估算值而非 Kernel 精确计数，首份样本前显示 `--`。内存来自 `MicoGetMemoryInfo()`；Flash 仅展示 `MicoFlashGetInfo()` 的分区名称、起始地址和容量，不读取参数内容。设备没有文件系统，不显示虚构的磁盘使用率。
+系统 Tab 每 3 秒读取 `/api/system/stats`。CPU sampler 在开机稳定至少 30 秒且内存充足后才创建；该优先级 8 普通线程每 5 秒进行 100 ms 低优先级计数采样，是估算值而非 Kernel 精确计数，首份样本前显示 `--`。内存来自 `MicoGetMemoryInfo()`；Flash 仅展示 `MicoFlashGetInfo()` 的分区名称、起始地址和容量，不读取参数内容。设备没有文件系统，不显示虚构的磁盘使用率。
 
 ## 传感器桥接与串口诊断
 
@@ -82,7 +84,7 @@ v0.5.1 在 150 ms RTOS timer callback 中调用互斥锁与 PWM HAL，HardFault 
 
 ## MQTT 与 Home Assistant
 
-MQTT 使用 SDK 自带库和独立线程，支持普通 TCP、LWT、离线重连与 retained 传感器状态。Broker 配置保存在 MiCO 参数分区的应用 user data，带 magic、版本和 CRC32；MQTT 密码以明文存在本机 Flash，**不是加密保险库**，GET API 和日志不会返回密码。密码框留空会保留已保存密码，勾选“清除已保存的密码”才清除。设置细节见 [MQTT 文档](docs/mqtt.md)。
+MQTT 使用 SDK 自带库；线程按需创建，且创建前必须保留 OTA 所需堆内存。支持普通 TCP、LWT、离线重连与 retained 传感器状态。Broker 配置保存在 MiCO 参数分区的应用 user data，带 magic、版本和 CRC32；MQTT 密码以明文存在本机 Flash，**不是加密保险库**，GET API 和日志不会返回密码。密码框留空会保留已保存密码，勾选“清除已保存的密码”才清除。设置细节见 [MQTT 文档](docs/mqtt.md)。
 
 Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置、MQTT 已启用、Broker 已连接时允许开启；否则返回 HTTP 409。四个传感器共享一个设备标识，关闭时删除 retained Discovery 配置。字段与主题见 [Home Assistant 文档](docs/homeassistant.md)。MQTT/Discovery 尚未实机验证，不能把编译成功视为 Broker 或 HA 连接成功。
 

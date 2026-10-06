@@ -9,6 +9,7 @@ typedef struct { int placeholder; } mico_Context_t;
 typedef struct { int num_of_chunks,total_memory,allocted_memory,free_memory; } micoMemInfo_t;
 typedef void (*timer_handler_t)(void *);
 typedef struct { void *handle; timer_handler_t function; void *arg; } mico_timer_t;
+typedef enum { mico_notify_Stack_Overflow_ERROR } mico_notify_types_t;
 #define kNoErr 0
 #define kNotPreparedErr (-1)
 #define kParamErr (-2)
@@ -28,3 +29,4 @@ OSStatus mico_system_context_update(mico_Context_t *context);
 OSStatus mico_rtos_init_timer(mico_timer_t *timer,uint32_t milliseconds,timer_handler_t callback,void *arg);
 OSStatus mico_rtos_start_timer(mico_timer_t *timer);
 OSStatus mico_rtos_stop_timer(mico_timer_t *timer);
+OSStatus mico_system_notify_register(mico_notify_types_t type,void *handler,void *arg);

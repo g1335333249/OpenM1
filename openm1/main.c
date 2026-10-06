@@ -14,6 +14,11 @@ static int boot_free_heap(void)
     micoMemInfo_t *memory=MicoGetMemoryInfo();
     return memory?memory->free_memory:-1;
 }
+static void boot_heap_log(const char *phase)
+{
+    system_stats_note_heap(1);
+    printf("BOOT: free heap %s = %d\r\n",phase,boot_free_heap());
+}
 
 static void boot_log_init_error(const char *module,OSStatus error)
 {
@@ -35,6 +40,7 @@ int main(void)
     static const unsigned retry_delay_ms[] = {500u,1000u};
     unsigned long counter = 0;
     micoMemInfo_t *memory;
+    int network_health_started=0;
 
     printf("================================\r\n"
            "OpenM1\r\n"
@@ -55,6 +61,11 @@ int main(void)
     printf("RECOVERY: MicoInit\r\n");
     result = MicoInit();
     printf("RECOVERY: MicoInit result = %d\r\n", result);
+    result=system_stats_init(); /* Mutexes and heap counters only; no CPU thread. */
+    if (result!=kNoErr) system_stats_enter_safe_mode();
+    boot_log_init_error("system stats",result);
+    result=system_stats_register_stack_diagnostic();
+    boot_log_init_error("stack diagnostic",result);
     mico_thread_msleep(500);
     MicoGetRfVer(rf_version, sizeof(rf_version));
     rf_version[sizeof(rf_version) - 1] = '\0';
@@ -118,22 +129,61 @@ int main(void)
             printf("RECOVERY: HTTP listener not ready yet; continuing boot\r\n");
     }
     printf("BOOT: phase 1 recovery ready\r\n");
+    boot_heap_log("after HTTP");
     boot_log_init_error("config",config_store_init());
     wifi_result=wifi_manager_init();
     boot_log_init_error("Wi-Fi manager",wifi_result);
+    system_stats_set_boot_phase("core");
     boot_log_init_error("display",m1_display_init());
+    mico_thread_msleep(250);
+    boot_heap_log("after display");
     boot_log_init_error("UART",m1_uart_init());
-    boot_log_init_error("network health",network_health_init());
+    mico_thread_msleep(250);
+    boot_heap_log("after UART");
     printf("BOOT: core services initialized\r\n");
+    boot_heap_log("before Wi-Fi control");
     boot_log_init_error("Wi-Fi boot policy",wifi_manager_apply_boot_settings());
-    printf("BOOT: Wi-Fi control started\r\n");
-    mico_thread_msleep(500);
-    boot_log_init_error("system stats",system_stats_init());
-    boot_log_init_error("MQTT",mqtt_manager_init());
-    printf("BOOT: optional services initialized\r\n");
+    {
+        unsigned tries;
+        for (tries=0;tries<10 && !wifi_manager_control_running();tries++)
+            mico_thread_msleep(100);
+    }
+    boot_heap_log("after Wi-Fi control");
+    if (!wifi_manager_control_running()) {
+        system_stats_enter_safe_mode();
+        printf("WIFI: control worker unavailable; entering Recovery safe mode\r\n");
+    } else {
+        system_stats_set_boot_phase("wifi");
+        printf("BOOT: Wi-Fi control started\r\n");
+        mico_thread_msleep(500);
+        if (boot_free_heap()<(int)OPENM1_MIN_HEAP_RESERVE) {
+            system_stats_enter_safe_mode();
+            printf("BOOT: low memory safe mode; optional workers deferred\r\n");
+        }
+    }
+    boot_heap_log("before MQTT");
+    if (!system_stats_low_memory_safe_mode())
+        boot_log_init_error("MQTT",mqtt_manager_init());
+    boot_heap_log("after MQTT");
+    printf("BOOT: optional managers initialized; workers remain deferred\r\n");
     printf("BOOT: subsystem initialization complete, free heap = %d\r\n",boot_free_heap());
     for (;;) {
         mico_thread_msleep(10000);
+        system_stats_note_heap(0);
+        if (!network_health_started && wifi_manager_control_running() &&
+            wifi_manager_station_ready() && !system_stats_low_memory_safe_mode() &&
+            system_stats_begin_optional_thread(NETWORK_HEALTH_WORKER_STACK)) {
+            network_health_started=1;
+            boot_log_init_error("network health",network_health_init());
+            system_stats_end_thread_creation();
+            boot_heap_log("after network health");
+        }
+        if (mico_rtos_get_time()>=30000u && wifi_manager_control_running() &&
+            !system_stats_stack_overflow_count() && !system_stats_low_memory_safe_mode()) {
+            mqtt_manager_maybe_start(0);
+            mico_thread_msleep(300);
+            system_stats_maybe_start_cpu();
+        }
         memory = MicoGetMemoryInfo();
         printf("RECOVERY: alive %lu, free heap = %d\r\n", ++counter,
                memory ? memory->free_memory : -1);

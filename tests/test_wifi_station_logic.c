@@ -34,6 +34,11 @@ int main(void)
     assert(!wifi_ap_close_eligible(1,1,0,1,0));
     assert(!wifi_ap_close_eligible(1,1,1,0,0));
     assert(!wifi_ap_close_eligible(1,1,1,1,1));
+    assert(!wifi_ap_close_timing_ready(119999,60000,0));
+    assert(!wifi_ap_close_timing_ready(120000,100000,0));
+    assert(wifi_ap_close_timing_ready(130000,100000,0));
+    assert(!wifi_ap_close_timing_ready(130000,100000,150000));
+    assert(wifi_ap_close_timing_ready(150000,100000,150000));
     assert(!wifi_recovery_ap_needs_restore(0,0,1));
     assert(wifi_recovery_ap_needs_restore(0,0,0));
     assert(!wifi_recovery_ap_needs_restore(1,1,0));

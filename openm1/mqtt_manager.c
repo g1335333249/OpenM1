@@ -6,6 +6,7 @@
 #include "m1_sensor.h"
 #include "recovery.h"
 #include "wifi_manager.h"
+#include "system_stats.h"
 #include "MQTTClient.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,7 @@ static mqtt_status_t status={{0}};
 static mico_mutex_t status_mutex;
 static mico_thread_t worker_thread;
 static int manager_ready;
+static int worker_created,worker_creation_pending;
 /* MQTTClient.c reallocates before receiving a body. Reject oversized broker
  * remaining-length fields while they are decoded, before that allocation. */
 static unsigned rx_phase,rx_remaining,rx_multiplier;
@@ -128,11 +130,17 @@ int mqtt_manager_configure(const char *body,size_t length)
 int mqtt_manager_start(void)
 {
     openm1_config_t config;
+    int started;
     if (!manager_ready) return -3;
     config_store_get(&config);
     if (!config.host[0]) return -2;
     config.mqtt_enabled=1;
-    return config_store_save(&config)==kNoErr?0:-3;
+    if (config_store_save(&config)!=kNoErr) return -3;
+    mqtt_manager_maybe_start(1);
+    mico_rtos_lock_mutex(&status_mutex);
+    started=worker_created;
+    mico_rtos_unlock_mutex(&status_mutex);
+    return started?0:-4;
 }
 int mqtt_manager_stop(void)
 {
@@ -140,7 +148,9 @@ int mqtt_manager_stop(void)
     if (!manager_ready) return -3;
     config_store_get(&config);
     config.mqtt_enabled=0;
-    return config_store_save(&config)==kNoErr?0:-3;
+    if (config_store_save(&config)!=kNoErr) return -3;
+    set_state("disabled","");
+    return 0;
 }
 int mqtt_manager_set_discovery(int enabled)
 {
@@ -285,12 +295,49 @@ retry:
 }
 OSStatus mqtt_manager_init(void)
 {
+    openm1_config_t config;
     OSStatus err=mico_rtos_init_mutex(&status_mutex);
     if (err!=kNoErr) return err;
-    strcpy(status.state,"disabled");manager_ready=1;
+    config_store_get(&config);
+    strcpy(status.state,config.mqtt_enabled?"waiting_network":"disabled");
+    manager_ready=1;
+    return kNoErr;
+}
+void mqtt_manager_maybe_start(int user_requested)
+{
+    openm1_config_t config;
+    OSStatus err;
+    if (!manager_ready || recovery_ota_busy()) return;
+    if (system_stats_low_memory_safe_mode()) {
+        set_state("deferred_low_memory","低内存安全模式，MQTT 已延迟");
+        return;
+    }
+    config_store_get(&config);
+    if (!config.mqtt_enabled || !config.host[0]) return;
+    if (!user_requested && !wifi_manager_station_ready()) return;
+    mico_rtos_lock_mutex(&status_mutex);
+    if (worker_created || worker_creation_pending) {
+        mico_rtos_unlock_mutex(&status_mutex); return;
+    }
+    worker_creation_pending=1;
+    mico_rtos_unlock_mutex(&status_mutex);
+    if (!system_stats_begin_optional_thread(MQTT_WORKER_STACK)) {
+        set_state("deferred_low_memory","内存不足，MQTT 稍后重试");
+        mico_rtos_lock_mutex(&status_mutex); worker_creation_pending=0; mico_rtos_unlock_mutex(&status_mutex);
+        return;
+    }
+    printf("BOOT: free heap before MQTT worker = %d\r\n",system_stats_free_heap());
     err=mico_rtos_create_thread(&worker_thread,MICO_APPLICATION_PRIORITY,"openm1_mqtt",mqtt_worker,MQTT_WORKER_STACK,0);
-    if (err!=kNoErr) manager_ready=0;
-    return err;
+    system_stats_end_thread_creation();
+    mico_rtos_lock_mutex(&status_mutex);
+    worker_created=err==kNoErr;
+    worker_creation_pending=0;
+    mico_rtos_unlock_mutex(&status_mutex);
+    printf("BOOT: free heap after MQTT worker = %d\r\n",system_stats_free_heap());
+    if (err!=kNoErr) {
+        set_state("deferred_low_memory","MQTT worker 创建失败，稍后重试");
+        printf("MQTT: worker start failed: %d, free heap = %d\r\n",err,system_stats_free_heap());
+    }
 }
 static void json_escape(char *out,size_t cap,const char *in)
 {

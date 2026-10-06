@@ -35,7 +35,7 @@ for path in Path('openm1').glob('*.c'):
     code=path.read_text()
     for hal in ('micoWlanGetLinkStatus(', 'micoWlanGetIPStatus(', 'micoWlanSuspendStation(', 'micoWlanSuspendSoftAP(', 'micoWlanStartScanAdv('):
         assert hal not in code,(path,hal)
-assert main.index('recovery_http_start()') < main.index('config_store_init()') < main.index('wifi_manager_init()') < main.index('m1_display_init()') < main.index('wifi_manager_apply_boot_settings()') < main.index('system_stats_init()') < main.index('mqtt_manager_init()')
+assert main.index('system_stats_init()') < main.index('recovery_http_start()') < main.index('config_store_init()') < main.index('wifi_manager_init()') < main.index('m1_display_init()') < main.index('wifi_manager_apply_boot_settings()') < main.index('mqtt_manager_init()')
 assert 'mico_thread_msleep(500);' in main
 assert 'native_reconnect_successes' in wifi and 'wifi_control_loop_count' in wifi
 assert 'MiCO 原生重连' in page and '受控重置 Station' in page
