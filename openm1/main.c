@@ -2,6 +2,7 @@
 #include "mico_wlan.h"
 #include "recovery.h"
 #include "wifi_manager.h"
+#include "wifi_station_logic.h"
 #include "m1_uart.h"
 #include "config_store.h"
 #include "mqtt_manager.h"
@@ -27,9 +28,41 @@ static void boot_log_init_error(const char *module,OSStatus error)
                module,error,boot_free_heap());
 }
 
+#define OPENM1_HOUSEKEEPING_STACK 2048u
+static mico_thread_t housekeeping_thread;
+static void housekeeping_worker(mico_thread_arg_t arg)
+{
+    unsigned long counter=0;
+    int network_health_started=0;
+    micoMemInfo_t *memory;
+    (void)arg;
+    for (;;) {
+        mico_thread_msleep(10000);
+        system_stats_note_heap(0);
+        if (!network_health_started && wifi_manager_control_running() &&
+            wifi_manager_station_ready() && !system_stats_low_memory_safe_mode() &&
+            system_stats_begin_optional_thread(NETWORK_HEALTH_WORKER_STACK)) {
+            network_health_started=1;
+            boot_log_init_error("network health",network_health_init());
+            system_stats_end_thread_creation();
+            boot_heap_log("after network health");
+        }
+        if (mico_rtos_get_time()>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS &&
+            wifi_manager_control_running() &&
+            !system_stats_stack_overflow_count() && !system_stats_low_memory_safe_mode()) {
+            mqtt_manager_maybe_start(0);
+            mico_thread_msleep(300);
+            system_stats_maybe_start_cpu();
+        }
+        memory=MicoGetMemoryInfo();
+        printf("RECOVERY: alive %lu, free heap = %d\r\n",++counter,
+               memory?memory->free_memory:-1);
+    }
+}
+
 int main(void)
 {
-    network_InitTypeDef_st wifi_config;
+    static network_InitTypeDef_st wifi_config;
     mico_Context_t *context;
     char rf_version[64] = {0};
     uint8_t mac[6] = {0};
@@ -38,13 +71,10 @@ int main(void)
     OSStatus result,ap_result,http_result,wifi_result;
     unsigned attempt;
     static const unsigned retry_delay_ms[] = {500u,1000u};
-    unsigned long counter = 0;
-    micoMemInfo_t *memory;
-    int network_health_started=0;
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.3\r\n"
+           "Version: 0.6.4\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -133,6 +163,8 @@ int main(void)
     boot_log_init_error("config",config_store_init());
     wifi_result=wifi_manager_init();
     boot_log_init_error("Wi-Fi manager",wifi_result);
+    if (wifi_result==kNoErr)
+        wifi_manager_set_initial_ap_state(ap_result==kNoErr);
     system_stats_set_boot_phase("core");
     boot_log_init_error("display",m1_display_init());
     mico_thread_msleep(250);
@@ -167,25 +199,10 @@ int main(void)
     boot_heap_log("after MQTT");
     printf("BOOT: optional managers initialized; workers remain deferred\r\n");
     printf("BOOT: subsystem initialization complete, free heap = %d\r\n",boot_free_heap());
-    for (;;) {
-        mico_thread_msleep(10000);
-        system_stats_note_heap(0);
-        if (!network_health_started && wifi_manager_control_running() &&
-            wifi_manager_station_ready() && !system_stats_low_memory_safe_mode() &&
-            system_stats_begin_optional_thread(NETWORK_HEALTH_WORKER_STACK)) {
-            network_health_started=1;
-            boot_log_init_error("network health",network_health_init());
-            system_stats_end_thread_creation();
-            boot_heap_log("after network health");
-        }
-        if (mico_rtos_get_time()>=30000u && wifi_manager_control_running() &&
-            !system_stats_stack_overflow_count() && !system_stats_low_memory_safe_mode()) {
-            mqtt_manager_maybe_start(0);
-            mico_thread_msleep(300);
-            system_stats_maybe_start_cpu();
-        }
-        memory = MicoGetMemoryInfo();
-        printf("RECOVERY: alive %lu, free heap = %d\r\n", ++counter,
-               memory ? memory->free_memory : -1);
-    }
+    result=mico_rtos_create_thread(&housekeeping_thread,MICO_APPLICATION_PRIORITY,
+                                   "openm1_housekeeping",housekeeping_worker,
+                                   OPENM1_HOUSEKEEPING_STACK,0);
+    boot_log_init_error("housekeeping",result);
+    printf("BOOT: main initialization complete; releasing app_thread\r\n");
+    return 0;
 }

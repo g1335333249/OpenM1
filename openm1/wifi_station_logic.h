@@ -8,7 +8,12 @@
 #define WIFI_CONTROLLED_REARM_MIN_INTERVAL_MS 60000u
 #define WIFI_STATION_LOSS_THRESHOLD 3u
 #define WIFI_STATION_READY_THRESHOLD 2u
-#define WIFI_BOOT_AUTO_CONNECT_GRACE_MS 2000u
+#define WIFI_BOOT_AUTO_CONNECT_GRACE_MS 60000u
+#define WIFI_RECOVERY_WEB_ACTIVITY_HOLD_MS 15000u
+#define WIFI_AP_PROBE_INTERVAL_MS 5000u
+#define WIFI_AP_MISSING_THRESHOLD 3u
+#define WIFI_AP_MISSING_CONFIRM_MS 15000u
+#define WIFI_AP_BOOT_SELF_HEAL_HOLD_MS 15000u
 #define WIFI_AP_BOOT_FAILSAFE_MS 120000u
 #define WIFI_AP_STABLE_BEFORE_CLOSE_MS 30000u
 #define WIFI_AP_CLOSE_RETRY_MS 30000u
@@ -40,3 +45,6 @@ void wifi_station_desire(wifi_station_desired_t *desired,const char *ssid,
 void wifi_station_manual_disconnect(wifi_station_desired_t *desired);
 void wifi_station_drop_auto_desired(wifi_station_desired_t *desired);
 int wifi_recovery_ap_needs_restore(int close_eligible,int policy_closed,int observed_on);
+unsigned wifi_ap_missing_after_probe(unsigned previous,int observed);
+int wifi_ap_restore_confident(uint32_t now,uint32_t missing_since,
+                              unsigned missing_samples,int ap_down_confirmed);

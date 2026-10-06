@@ -183,6 +183,7 @@ static void handle_client(int fd)
     if (sscanf(request,"%7s %79s",method,path)!=2) { recovery_send_json(fd,400,"{\"message\":\"Bad request\"}"); goto done; }
     request[body_start-2]=0;
     if (!parse_content_length(request,&length,&seen)) { recovery_send_json(fd,400,"{\"message\":\"Invalid request framing\"}"); goto done; }
+    wifi_manager_note_recovery_activity();
     body_len=used-(size_t)body_start;
     if (!strcmp(method,"GET")) {
         if (!strcmp(path,"/")) recovery_send_text(fd,200,"text/html; charset=utf-8",recovery_page,recovery_page_length);
@@ -207,7 +208,7 @@ static void handle_client(int fd)
             network_health_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.3\",\"version\":\"0.6.3\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.4\",\"version\":\"0.6.4\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {

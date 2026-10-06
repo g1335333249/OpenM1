@@ -14,6 +14,9 @@ int main(void)
     assert(WIFI_CONTROL_WORKER_STACK==5120);
     assert(WIFI_NATIVE_RETRY_INTERVAL_MS==5000);
     assert(WIFI_NATIVE_RECONNECT_GRACE_MS==60000);
+    assert(WIFI_BOOT_AUTO_CONNECT_GRACE_MS==60000);
+    assert(WIFI_AP_PROBE_INTERVAL_MS==5000);
+    assert(WIFI_AP_MISSING_THRESHOLD==3);
     assert(!wifi_station_note_good(&samples));
     assert(wifi_station_note_good(&samples));
     assert(!wifi_station_note_bad(&samples));
@@ -43,6 +46,16 @@ int main(void)
     assert(wifi_recovery_ap_needs_restore(0,0,0));
     assert(!wifi_recovery_ap_needs_restore(1,1,0));
     assert(wifi_recovery_ap_needs_restore(0,1,0));
+    assert(wifi_ap_missing_after_probe(0,0)==1);
+    assert(wifi_ap_missing_after_probe(1,0)==2);
+    assert(wifi_ap_missing_after_probe(2,0)==3);
+    assert(wifi_ap_missing_after_probe(3,0)==3);
+    assert(wifi_ap_missing_after_probe(3,1)==0);
+    assert(!wifi_ap_restore_confident(15000,5000,1,0));
+    assert(!wifi_ap_restore_confident(15000,5000,2,0));
+    assert(!wifi_ap_restore_confident(19999,5000,3,0));
+    assert(wifi_ap_restore_confident(20000,5000,3,0));
+    assert(wifi_ap_restore_confident(6000,5000,1,1));
     wifi_station_desire(&desired,"AutoSSID","auto-secret",WIFI_DESIRED_AUTO);
     assert(desired.want_connected && desired.source==WIFI_DESIRED_AUTO);
     wifi_station_drop_auto_desired(&desired);

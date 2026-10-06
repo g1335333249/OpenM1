@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.3
+PREFIX=OpenM1-v0.6.4
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 TOOL=.micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/Linux64/bin
 [[ "$(git -C mico-os rev-parse HEAD)" == "$SDK_COMMIT" ]]
@@ -12,6 +12,7 @@ python3 tools/embed_page.py --check
 python3 tests/test_web_tabs.py
 python3 tests/test_v063_static.py
 python3 tests/test_v063_safety.py
+python3 tests/test_v064_static.py
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_sensor.c openm1/m1_sensor.c -o /tmp/openm1-sensor-test
 /tmp/openm1-sensor-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_display.c openm1/m1_display_network.c -o /tmp/openm1-display-test

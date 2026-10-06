@@ -16,6 +16,7 @@ typedef struct {
 
 void network_health_step(network_health_snapshot_t *snapshot, int has_wifi, int probe_result);
 OSStatus network_health_init(void);
+int network_health_available(void);
 void network_health_notify_link_down(void);
 void network_health_notify_link_ready(void);
 void network_health_status_json(char *out,size_t capacity);

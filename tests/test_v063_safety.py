@@ -11,14 +11,14 @@ manifest=Path('tools/generate_manifest.py').read_text()
 assert main.index('system_stats_init()') < main.index('recovery_http_start()') < main.index('config_store_init()') < main.index('wifi_manager_init()') < main.index('m1_display_init()') < main.index('m1_uart_init()') < main.index('wifi_manager_apply_boot_settings()') < main.index('mqtt_manager_init()')
 assert main.index('wifi_manager_control_running()') < main.index('network_health_init()')
 assert main.index('wifi_manager_station_ready()') < main.index('network_health_init()')
-assert main.index('network_health_init()') > main.index('for (;;)')
+assert main.index('network_health_init()') > main.index('static void housekeeping_worker')
 assert 'mico_thread_msleep(250)' in main and 'mico_thread_msleep(500)' in main
 for name in ('after HTTP','after display','after UART','before Wi-Fi control','after Wi-Fi control','after network health','before MQTT','after MQTT'):
     assert f'boot_heap_log("{name}")' in main
 assert 'control worker unavailable; entering Recovery safe mode' in main
 assert 'system_stats_low_memory_safe_mode()' in main
-assert 'mico_rtos_get_time()>=30000u' in main
-assert main.index('mqtt_manager_maybe_start(0)') > main.index('mico_rtos_get_time()>=30000u')
+assert 'mico_rtos_get_time()>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS' in main
+assert main.index('mqtt_manager_maybe_start(0)') > main.index('mico_rtos_get_time()>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS')
 assert 'system_stats_maybe_start_cpu()' in main
 assert 'OPENM1_MIN_HEAP_RESERVE 8192u' in Path('openm1/system_stats.h').read_text()
 assert 'system_stats_register_stack_diagnostic()' in main

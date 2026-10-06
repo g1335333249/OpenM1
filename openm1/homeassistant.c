@@ -47,7 +47,7 @@ int homeassistant_publish(Client *client,const openm1_config_t *config,int remov
                 "\"state_class\":\"measurement\",%s"
                 "\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
                 "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\",\"manufacturer\":\"Phicomm / OpenM1\","
-                "\"model\":\"M1\",\"sw_version\":\"OpenM1 v0.6.3\",\"configuration_url\":\"%s\"}}",
+                "\"model\":\"M1\",\"sw_version\":\"OpenM1 v0.6.4\",\"configuration_url\":\"%s\"}}",
                 entity->name,id,entity->object,state,entity->json_key,entity->unit,
                 class_field,
                 availability,id,recovery_ssid(),url);

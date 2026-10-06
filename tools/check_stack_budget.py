@@ -18,10 +18,11 @@ for line in subprocess.check_output([a.nm,'-n',str(a.elf)],text=True).splitlines
         symbols[parts[-1]]=int(parts[0],16)
 assert len(symbols)==2, 'missing APP heap linker bounds'
 heap=symbols['_ram_end_']-symbols['link_bss_end']
-critical=4096+6144+2048+4096+5120+5120 # app, HTTP, display, UART, Wi-Fi, OTA rescue
+critical=6144+2048+4096+5120+2048 # HTTP, display, UART, Wi-Fi, housekeeping
+ota=5120
 optional=3072+1024+6144 # health, CPU, MQTT
 frames={}
-needed=('wifi_control_worker','recovery_http_server_thread','m1_uart_worker',
+needed=('housekeeping_worker','wifi_control_worker','recovery_http_server_thread','m1_uart_worker',
         'network_display_worker','health_worker','mqtt_worker')
 for path in a.su_dir.glob('*.su'):
     for line in path.read_text().splitlines():
@@ -34,13 +35,16 @@ missing=set(needed)-set(frames)
 assert not missing, f'missing stack usage frames: {sorted(missing)}'
 reserve=heap-critical
 report=[f'APP_HEAP_REGION_BYTES={heap}',f'CRITICAL_THREAD_STACK_BUDGET={critical}',
-        f'OPTIONAL_THREAD_STACK_BUDGET={optional}',f'CRITICAL_THEORETICAL_HEAP_RESERVE={reserve}',
-        'CRITICAL_INCLUDES_OTA_WORKER=YES',
+        f'PERMANENT_CRITICAL_STACK_BUDGET={critical}',f'TEMPORARY_OTA_STACK={ota}',
+        f'OPTIONAL_THREAD_STACK_BUDGET={optional}',f'OPTIONAL_STACK_BUDGET={optional}',
+        f'STABLE_THEORETICAL_HEAP_RESERVE={reserve}',
+        f'OTA_THEORETICAL_HEAP_RESERVE={reserve-ota}',
+        'APP_THREAD_RELEASED_AFTER_BOOT=YES',
         'STACK_USAGE_SCOPE=individual function frames only; external SDK call chains excluded']
 for name in needed:
     size,kind,source=frames[name]
     report.append(f'{name}: {size} bytes ({kind}; {source})')
 a.output.write_text('\n'.join(report)+'\n')
 print('\n'.join(report))
-if reserve<10000:
-    raise SystemExit('critical theoretical heap reserve below 10000 bytes')
+if reserve<12000 or reserve-ota<10000:
+    raise SystemExit('theoretical heap reserve below safety threshold')

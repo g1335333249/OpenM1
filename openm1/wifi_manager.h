@@ -9,6 +9,8 @@
 #define WIFI_SCAN_MAX_AP 20
 
 OSStatus wifi_manager_init(void);
+void wifi_manager_set_initial_ap_state(int started);
+void wifi_manager_note_recovery_activity(void);
 OSStatus wifi_manager_apply_boot_settings(void);
 void wifi_manager_settings_json(char *out,size_t capacity);
 int wifi_manager_save_settings(const char *body,size_t length);

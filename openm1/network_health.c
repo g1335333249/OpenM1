@@ -106,12 +106,12 @@ OSStatus network_health_init(void)
     if (err!=kNoErr) return err;
     health.state=NETWORK_NO_WIFI;
     health_ready=1;
-    apply_state(NETWORK_NO_WIFI);
     err=mico_rtos_create_thread(&health_thread,MICO_APPLICATION_PRIORITY,"openm1_net_health",
                                 health_worker,NETWORK_HEALTH_WORKER_STACK,0);
     if (err!=kNoErr) health_ready=0;
     return err;
 }
+int network_health_available(void) { return health_ready; }
 
 void network_health_notify_link_down(void)
 {

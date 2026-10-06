@@ -1,4 +1,5 @@
 #include "system_stats.h"
+#include "wifi_station_logic.h"
 #include "mico_hal/mico_flash.h"
 #include "recovery.h"
 #include "wifi_manager.h"
@@ -169,7 +170,8 @@ void system_stats_json(char *out,size_t capacity)
         mico_rtos_unlock_mutex(&stats_mutex);
     } else { boot_min=boot_min_free_heap; runtime_min=runtime_min_free_heap;
              safe=low_memory_safe_mode; snprintf(phase,sizeof(phase),"%s",boot_phase); }
-    stable=!safe && mico_rtos_get_time()>=30000u && wifi_manager_control_running() &&
+    stable=!safe && mico_rtos_get_time()>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS &&
+           wifi_manager_control_running() &&
            !stack_overflow_count && system_stats_free_heap()>=(int)OPENM1_MIN_HEAP_RESERVE;
     if (stable) snprintf(phase,sizeof(phase),"stable");
     if (memory) {

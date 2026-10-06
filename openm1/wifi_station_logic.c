@@ -66,3 +66,15 @@ int wifi_recovery_ap_needs_restore(int close_eligible,int policy_closed,int obse
 {
     return !observed_on && (!close_eligible || !policy_closed);
 }
+unsigned wifi_ap_missing_after_probe(unsigned previous,int observed)
+{
+    if (observed) return 0;
+    return previous<WIFI_AP_MISSING_THRESHOLD?previous+1:previous;
+}
+int wifi_ap_restore_confident(uint32_t now,uint32_t missing_since,
+                              unsigned missing_samples,int ap_down_confirmed)
+{
+    if (ap_down_confirmed) return 1;
+    return missing_samples>=WIFI_AP_MISSING_THRESHOLD && missing_since &&
+           (uint32_t)(now-missing_since)>=WIFI_AP_MISSING_CONFIRM_MS;
+}
