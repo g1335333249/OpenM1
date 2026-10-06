@@ -48,7 +48,8 @@ void openm1_log_write(openm1_log_level_t level,const char *module,const char *fm
     records[slot].uptime_ms=now;
     records[slot].level=(uint8_t)level;
     snprintf(records[slot].module,sizeof(records[slot].module),"%s",module);
-    snprintf(records[slot].message,sizeof(records[slot].message),"%s",scratch);
+    memcpy(records[slot].message,scratch,sizeof(records[slot].message)-1u);
+    records[slot].message[sizeof(records[slot].message)-1u]=0;
     if (count<OPENM1_LOG_RECORD_COUNT) count++;
     else dropped_count++;
     head=(head+1u)%OPENM1_LOG_RECORD_COUNT;
