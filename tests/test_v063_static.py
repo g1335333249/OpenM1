@@ -5,7 +5,7 @@ main=Path('openm1/main.c').read_text()
 http=Path('openm1/recovery_http.c').read_text()
 page=Path('openm1/recovery_page.html').read_text()
 manifest=Path('tools/generate_manifest.py').read_text()
-assert '0.6.5' in main and '0.6.5' in http and '0.6.5' in manifest
+assert '0.6.6' in main and '0.6.6' in http and '0.6.6' in manifest
 assert 'wifi_control_worker(mico_thread_arg_t arg)' in wifi
 assert wifi.count('mico_rtos_create_thread(')==1
 for old in ('ap_policy_worker','wifi_station_supervisor_worker','wlan_control_mutex','station_supervisor_thread','ap_policy_thread','openm1_config_t config;\n    OSStatus err;\n    int eligible'):
@@ -39,7 +39,7 @@ assert main.index('system_stats_init()') < main.index('recovery_http_start()') <
 assert 'mico_thread_msleep(500);' in main
 assert 'native_reconnect_successes' in wifi and 'wifi_control_loop_count' in wifi
 assert 'MiCO 原生重连' in page and '受控重置 Station' in page
-assert 'WIFI: first Station arm' in wifi
+assert 'openm1_log_info("WIFI","first Station arm")' in wifi
 assert 'wifi_ap_close_eligible' in wifi and 'wifi_ap_close_eligible' in Path('openm1/wifi_station_logic.c').read_text()
 assert 'openm1_config_t' not in worker
 import re

@@ -1,4 +1,5 @@
 #include "m1_uart.h"
+#include "openm1_log.h"
 #include "m1_sensor.h"
 #include "m1_display.h"
 #include "recovery.h"
@@ -123,7 +124,7 @@ void m1_uart_worker(mico_thread_arg_t arg)
 {
     uint8_t batch[128];
     uint8_t queued_frame[12];
-    uint32_t wanted,available,now,last_log=0;
+    uint32_t wanted,available,now,last_log=0,last_error_log=0,last_invalid_log=0,last_invalid_count=0;
     unsigned count;
     OSStatus err;
     (void)arg;
@@ -147,10 +148,15 @@ void m1_uart_worker(mico_thread_arg_t arg)
             mico_rtos_unlock_mutex(&uart_mutex);
             if (err!=kNoErr) {
                 printf("SENSOR: UART1 init failed, error=%d; retrying\r\n",err);
+                now=mico_rtos_get_time();
+                if (!last_error_log || now-last_error_log>=30000u) {
+                    openm1_log_error("UART","UART1 init failed: %d",err);
+                    last_error_log=now;
+                }
                 mico_thread_msleep(2000);
                 continue;
             }
-            printf("SENSOR: UART1 receive ready, %lu 8N1\r\n",(unsigned long)wanted);
+            openm1_log_info("UART","UART1 ready, %lu 8N1",(unsigned long)wanted);
             printf("SENSOR: UART1 ready\r\n");
             mico_thread_msleep(400);
             m1_display_sync_from_uart_worker();
@@ -191,6 +197,12 @@ void m1_uart_worker(mico_thread_arg_t arg)
                    (unsigned long)snapshot.type0f_frames,(unsigned long)snapshot.type18_frames,
                    (unsigned long)snapshot.invalid_frames);
             mico_rtos_unlock_mutex(&uart_mutex);
+            if (snapshot.invalid_frames>last_invalid_count &&
+                (!last_invalid_log || now-last_invalid_log>=60000u)) {
+                openm1_log_warn("UART","protocol errors total=%lu",(unsigned long)snapshot.invalid_frames);
+                last_invalid_log=now;
+            }
+            last_invalid_count=snapshot.invalid_frames;
             last_log=now;
         }
     }

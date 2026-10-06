@@ -1,5 +1,6 @@
 #include "recovery.h"
 #include "system_stats.h"
+#include "openm1_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,7 +55,7 @@ static void set_status(const char *state, const char *message, uint32_t received
 }
 static void fail(const char *message)
 {
-    printf("OTA: FAILED: %s\r\n", message);
+    openm1_log_error("OTA","FAILED: %s",message);
     set_status("failed", message, status.received, status.total);
 }
 int recovery_ota_busy(void)
@@ -170,7 +171,7 @@ int recovery_ota_verify_flash(uint32_t total, uint16_t *boot_crc)
         at+=count; left-=count;
     }
     if (app_crc!=app_expected) { fail("APP CRC mismatch"); return 0; }
-    printf("OTA: app CRC OK\r\nOTA: verifying MD5\r\n");
+    openm1_log_info("OTA","APP CRC OK; verifying MD5");
     set_status("verifying","Verifying MD5",total,total);
     if (!flash_read(total-MD5_SIZE,embedded_md5,MD5_SIZE)) { fail("MD5 read failed"); return 0; }
     InitMd5(&md5); CRC16_Init(&crc);
@@ -196,7 +197,7 @@ int recovery_ota_verify_flash(uint32_t total, uint16_t *boot_crc)
     if (memcmp(embedded_md5,calculated_md5,MD5_SIZE)) { fail("OTA MD5 mismatch"); return 0; }
     *boot_crc=boot_result;
     printf("OTA: detected kernel = %s\r\n",detected_kernel);
-    printf("OTA: MD5 OK\r\nOTA: OTA CRC16 = %04x\r\n",boot_result);
+    openm1_log_info("OTA","MD5 OK; OTA CRC16=%04x",boot_result);
     return 1;
 }
 static int parse_url(const char *url, char *host, size_t host_size, uint16_t *port, const char **path)
@@ -275,11 +276,11 @@ static void recovery_ota_upload_handler(mico_thread_arg_t arg)
     if (job.is_url) {
         char url[URL_LIMIT+1];
         memcpy(url,job.initial,job.initial_len); url[job.initial_len]=0;
-        printf("OTA: URL begin %s\r\n",url);
+        openm1_log_info("OTA","URL begin");
         ok=url_download(url);
         total=status.total;
     } else {
-        printf("OTA: upload begin\r\n");
+        openm1_log_info("OTA","upload begin");
         ok=ota_receive(job.fd,total,job.initial,job.initial_len,"uploading");
     }
     if (ok) ok=recovery_ota_verify_flash(total,&boot_crc);
@@ -294,12 +295,12 @@ static void recovery_ota_upload_handler(mico_thread_arg_t arg)
         if (result==kNoErr) result=mico_system_context_update(context);
         if (result!=kNoErr) fail("Boot table update failed");
         else {
-            printf("OTA: boot table updated\r\n");
+            openm1_log_info("OTA","boot table updated");
             set_status("rebooting","Upgrade verified; rebooting",total,total);
             recovery_send_json(job.fd,200,"{\"ok\":true,\"message\":\"OTA verified. Device will reboot.\"}");
             close(job.fd);
             mico_thread_msleep(2000);
-            printf("OTA: rebooting\r\n");
+            openm1_log_info("OTA","reboot requested");
             MicoSystemReboot();
         }
     }

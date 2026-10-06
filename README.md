@@ -1,4 +1,4 @@
-# OpenM1 v0.6.5
+# OpenM1 v0.6.6
 
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
@@ -10,9 +10,11 @@ v0.5.2 实机长期运行时曾发生真实家庭 Wi-Fi Station 掉线：路由�
 
 v0.6.1 第一次刷入运行正常；断电冷启动后，实体 Wi-Fi 图标不亮，保存的家庭 Wi-Fi 未连接，Recovery AP 也消失。v0.6.2 虽然让首次 Station 连接跳过 `SuspendStation`，但实机冷启动仍有相同故障。两版日志均表明初始 SoftAP `StartNetwork` 返回 0、HTTP 与 OTA 已启动；v0.6.2 故障发生在明确的 `StartNetwork(STA)` 日志之前。**精确根因仍未知**，多线程 Wi-Fi 管理、启动并发、旧 MOC WLAN 状态机交互和线程栈压力都是待检因素；不能宣称已确认 Kernel 缺陷或 AP policy 栈溢出。
 
-v0.6.4 是面向冷启动救援的安全版本。启动后前 **60 秒**保持 Recovery AP、HTTP、OTA、显示和 UART 可用，期间不执行 `StartNetwork(Station)`。可连接 `OpenM1-XXXXXX`，访问 `192.168.4.1` 关闭自动连接或执行 OTA；救援页仍在访问时，自动连接延至最近一次 HTTP 请求后至少 15 秒，OTA 忙时继续推迟 Station 启动。这是为了在旧 MOC Kernel 的 Station 路径仍有未知故障时尽量避免再次拆机刷写。AP 每 5 秒探测一次，普通探测需连续 3 次缺失并经过至少 15 秒才尝试恢复；明确 AP_DOWN 事件经 1 秒后再次探测确认，可提前恢复。显示初始化仍早于 Wi-Fi control worker，Wi-Fi 控制仍由单一 5120 字节线程负责。MiCO 原生 Station 重连间隔为 **5000 ms**，持续 60 秒未恢复才进行受控重置。**冷启动、运行期重连和长期运行仍待真实 M1 验证。**
+v0.6.4 是面向冷启动救援的安全版本。启动后前 **60 秒**保持 Recovery AP、HTTP、OTA、显示和 UART 可用，期间不执行 `StartNetwork(Station)`。可连接 `OpenM1-XXXXXX`，访问 `192.168.4.1` 关闭自动连接或执行 OTA；仅首次打开页面及明确救援操作将自动连接延至最近一次操作后至少 15 秒，状态轮询不会持续延期，OTA 忙时继续推迟 Station 启动。这是为了在旧 MOC Kernel 的 Station 路径仍有未知故障时尽量避免再次拆机刷写。AP 每 5 秒探测一次，普通探测需连续 3 次缺失并经过至少 15 秒才尝试恢复；明确 AP_DOWN 事件经 1 秒后再次探测确认，可提前恢复。显示初始化仍早于 Wi-Fi control worker，Wi-Fi 控制仍由单一 5120 字节线程负责。MiCO 原生 Station 重连间隔为 **5000 ms**，持续 60 秒未恢复才进行受控重置。**冷启动、运行期重连和长期运行仍待真实 M1 验证。**
 
-v0.6.5 只新增固定 DHCP hostname：设备 MAC 最后 3 字节生成 `OpenM1-XXXXXX`（大写十六进制），MAC 无效时使用 `OpenM1`。启动时通过固定 SDK 的 `sethostname()` 设置一次，名称保存在静态内存，并由 `/api/info`、`/api/wifi/status` 和系统页只读展示。部分路由器可能继续缓存旧名称 `MiCO`，直到 Station 重新获取 DHCP lease、设备重新连接或路由器客户端列表刷新；这不一定表示 hostname 设置失败。v0.6.5 的路由器显示效果仍待实机验证。
+v0.6.5 新增固定 DHCP hostname：设备 MAC 最后 3 字节生成 `OpenM1-XXXXXX`（大写十六进制），MAC 无效时使用 `OpenM1`。启动时通过固定 SDK 的 `sethostname()` 设置一次，名称保存在静态内存，并由 `/api/info`、`/api/wifi/status` 和系统页只读展示。部分路由器可能继续缓存旧名称 `MiCO`，直到 Station 重新获取 DHCP lease、设备重新连接或路由器客户端列表刷新；这不一定表示 hostname 设置失败。路由器显示效果仍待实机验证。
+
+v0.6.6 新增 24 条固定记录的 RAM 环形系统日志。OpenM1 自身的重要启动、网络、显示、MQTT、OTA 状态变化同时输出至调试串口和 RAM；覆盖最旧记录，不持续写入 Flash，断电或重启后自动丢失。系统页每 2 秒增量读取 `/api/logs?after=<sequence>`，支持暂停、WARN/ERROR 过滤、清空与流式下载文本。日志不记录 Wi-Fi/MQTT 密码、token 或 2 秒一次的传感器 UART 原始帧；业务原始帧仍在 `/api/uart/raw`。**Web 日志只从 OpenM1 logger 初始化后开始；OpenM1 `main()` 之前的 ROM/MOC 启动日志无法捕获，仍需调试串口。**
 
 `main()` 创建 2048 字节 housekeeping 线程后返回，由固定 MOC `pre_main()` 删除原 4096 字节 app_thread，永久线程栈净减少约 2048 字节。housekeeping 只负责低频心跳、内存采样和可选服务懒启动，不调用 WLAN HAL。
 
@@ -23,6 +25,8 @@ v0.6.5 只新增固定 DHCP hostname：设备 MAC 最后 3 字节生成 `OpenM1-
 ## 页面与接口
 
 访问 [http://192.168.4.1](http://192.168.4.1)。页面为单份内嵌 UTF-8 中文 HTML/CSS/JavaScript，无外部 CDN。七个 Tab 依次为首页、网络、MQTT、Home Assistant、固件升级、诊断、系统；URL hash 可直接打开指定 Tab，例如 `/#diagnostics`。页面只轮询当前 Tab 需要的状态，OTA 开始后则跨 Tab 持续轮询。OTA 重启时每 2 秒探测 `/api/health`，重新上线后刷新版本信息。
+
+RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.6-log.txt`；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
 
 | 路由 | 功能 |
 | --- | --- |
@@ -96,7 +100,7 @@ Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置
 
 完整 MOC OTA 由 Kernel、填充到 `0x75000`、8 字节 APP 头、APP payload、末尾 16 字节 raw MD5 组成。上传或 URL 下载时使用 2048 字节静态缓冲流式写入 `MICO_PARTITION_OTA_TEMP`，然后从 Flash 回读长度、两份 APP CRC、payload CRC 和整个 OTA（不含尾部 MD5）的 MD5；另外计算 boot table 所需 CRC16。验证成功才调用 `mico_ota_switch_to_new_fw(total_size - 16, boot_crc16)`，发送 HTTP 成功响应，等待两秒后 `MicoSystemReboot()`。任一校验失败不写升级标志、不重启。最大 OTA 文件限制为分区实际长度与 `0xB5000` 两者较小值。
 
-`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.5 的长期 Station 稳定性已通过实机验证。**
+`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.6 的长期 Station 稳定性已通过实机验证。**
 
 ## 构建与验证
 
@@ -114,9 +118,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.6.5@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.6.6@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.6.5.bin
+  --app dist/OpenM1-v0.6.6.bin
 ```
 
-GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.5`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.5 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
+GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.6`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.6 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。

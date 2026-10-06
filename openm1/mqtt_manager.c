@@ -1,4 +1,5 @@
 #include "mqtt_manager.h"
+#include "openm1_log.h"
 #include "config_store.h"
 #include "ha_policy.h"
 #include "homeassistant.h"
@@ -43,12 +44,21 @@ static int bounded_mqtt_read(Network *network,unsigned char *buffer,int length,i
 
 static void set_state(const char *state,const char *error)
 {
+    int changed;
     mico_rtos_lock_mutex(&status_mutex);
+    changed=strcmp(status.state,state)!=0;
     snprintf(status.state,sizeof(status.state),"%s",state);
     snprintf(status.error,sizeof(status.error),"%s",error?error:"");
     status.connected=!strcmp(state,"connected");
     if (!status.connected) status.ha_active=0;
     mico_rtos_unlock_mutex(&status_mutex);
+    if (changed) {
+        if (!strcmp(state,"connected")) openm1_log_info("MQTT","connected");
+        else if (!strcmp(state,"connecting")) openm1_log_info("MQTT","connecting");
+        else if (!strcmp(state,"deferred_low_memory")) openm1_log_warn("MQTT","low-memory deferred");
+        else if (!strcmp(state,"reconnecting")) openm1_log_warn("MQTT","disconnected; reconnecting");
+        else if (!strcmp(state,"disabled")) openm1_log_info("MQTT","disabled");
+    }
 }
 static int valid_topic(const char *value,size_t max)
 {

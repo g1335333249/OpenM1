@@ -7,8 +7,11 @@
 #include "m1_display.h"
 #include "network_health.h"
 #include "system_stats.h"
+#include "openm1_log.h"
+#include "http_activity.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <strings.h>
 
@@ -159,6 +162,35 @@ static int read_small_body(int fd,const char *request,int start,size_t initial,
     out[length]=0;
     return 1;
 }
+static void send_log_download(int fd)
+{
+    static const char header[]="HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
+        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.6-log.txt\"\r\n"
+        "Connection: close\r\nCache-Control: no-store\r\n\r\n";
+    openm1_log_status_t status;
+    openm1_log_record_t record;
+    char line[192];
+    uint32_t seq;
+    int n;
+    openm1_log_status(&status);
+    if (recovery_send_all(fd,header,sizeof(header)-1u)) return;
+    n=snprintf(line,sizeof(line),"OpenM1 v0.6.6\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
+               recovery_hostname(),(unsigned long)mico_rtos_get_time());
+    if (n>0 && n<(int)sizeof(line) && recovery_send_all(fd,line,(size_t)n)) return;
+    if (!status.available) {
+        static const char unavailable[]="Logger unavailable\r\n";
+        recovery_send_all(fd,unavailable,sizeof(unavailable)-1u);
+        return;
+    }
+    for (seq=status.oldest_sequence;status.count && seq<=status.newest_sequence;seq++) {
+        if (!openm1_log_get_record(seq,&record)) continue;
+        n=snprintf(line,sizeof(line),"[%06lu][%s][%s] %s\r\n",
+                   (unsigned long)record.uptime_ms,
+                   openm1_log_level_name((openm1_log_level_t)record.level),
+                   record.module,record.message);
+        if (n<=0 || n>=(int)sizeof(line) || recovery_send_all(fd,line,(size_t)n)) break;
+    }
+}
 static void handle_client(int fd)
 {
     /* This server processes one client at a time. Keep the large HTTP buffers
@@ -183,10 +215,28 @@ static void handle_client(int fd)
     if (sscanf(request,"%7s %79s",method,path)!=2) { recovery_send_json(fd,400,"{\"message\":\"Bad request\"}"); goto done; }
     request[body_start-2]=0;
     if (!parse_content_length(request,&length,&seen)) { recovery_send_json(fd,400,"{\"message\":\"Invalid request framing\"}"); goto done; }
-    wifi_manager_note_recovery_activity();
+    if (openm1_http_explicit_recovery_activity(method,path)) wifi_manager_note_recovery_activity();
     body_len=used-(size_t)body_start;
     if (!strcmp(method,"GET")) {
         if (!strcmp(path,"/")) recovery_send_text(fd,200,"text/html; charset=utf-8",recovery_page,recovery_page_length);
+        else if (!strcmp(path,"/api/logs/download")) send_log_download(fd);
+        else if (!strncmp(path,"/api/logs",9) && (path[9]==0 || path[9]=='?')) {
+            uint32_t after=0;
+            if (path[9]=='?') {
+                char *end;
+                unsigned long parsed;
+                if (strncmp(path+10,"after=",6) || path[16]<'0' || path[16]>'9') {
+                    recovery_send_json(fd,400,"{\"error\":\"Invalid log cursor\"}"); goto done;
+                }
+                errno=0;
+                parsed=strtoul(path+16,&end,10);
+                if (errno || *end || parsed>UINT32_MAX) {
+                    recovery_send_json(fd,400,"{\"error\":\"Invalid log cursor\"}"); goto done;
+                }
+                after=(uint32_t)parsed;
+            }
+            openm1_log_json(after,json,sizeof(json)); recovery_send_json(fd,200,json);
+        }
         else if (!strcmp(path,"/api/health")) recovery_send_json(fd,200,"{\"status\":\"ok\",\"recovery\":true}");
         else if (!strcmp(path,"/api/ota/status")) {
             recovery_ota_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
@@ -208,7 +258,7 @@ static void handle_client(int fd)
             network_health_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.5\",\"version\":\"0.6.5\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.6\",\"version\":\"0.6.6\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),recovery_hostname(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -221,6 +271,11 @@ static void handle_client(int fd)
         goto done;
     }
     if (strcmp(method,"POST")) { recovery_send_json(fd,405,"{\"message\":\"Method not allowed\"}"); goto done; }
+    if (!strcmp(path,"/api/logs/clear")) {
+        if ((seen && length) || body_len) recovery_send_json(fd,400,"{\"error\":\"Request body is not allowed\"}");
+        else { openm1_log_clear(); recovery_send_json(fd,200,"{\"ok\":true}"); }
+        goto done;
+    }
     if (!strcmp(path,"/api/wifi/settings")) {
         static char body[513];
         int result;
@@ -452,11 +507,15 @@ static void recovery_http_server_thread(mico_thread_arg_t arg)
 {
     struct sockaddr_in address;
     int listener,client,on=1;
+    uint32_t last_error_log=0,now;
     (void)arg;
     for (;;) {
         listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
         if (listener<0) {
-            printf("RECOVERY: HTTP socket failed; retrying\r\n");
+            now=mico_rtos_get_time();
+            if (!last_error_log || now-last_error_log>=30000u) {
+                openm1_log_error("RECOVERY","HTTP socket failed; retrying");last_error_log=now;
+            }
             mico_thread_msleep(2000);
             continue;
         }
@@ -465,13 +524,16 @@ static void recovery_http_server_thread(mico_thread_arg_t arg)
         address.sin_len=sizeof(address); address.sin_family=AF_INET;
         address.sin_addr.s_addr=INADDR_ANY; address.sin_port=htons(80);
         if (bind(listener,(struct sockaddr*)&address,sizeof(address))<0 || listen(listener,3)<0) {
-            printf("RECOVERY: HTTP bind/listen failed; retrying\r\n");
+            now=mico_rtos_get_time();
+            if (!last_error_log || now-last_error_log>=30000u) {
+                openm1_log_error("RECOVERY","HTTP bind/listen failed; retrying");last_error_log=now;
+            }
             close(listener);
             mico_thread_msleep(2000);
             continue;
         }
-        printf("RECOVERY: HTTP server listening on 0.0.0.0:80\r\n");
-        printf("RECOVERY: OTA service ready\r\n");
+        openm1_log_info("RECOVERY","HTTP listening on 0.0.0.0:80");
+        openm1_log_info("RECOVERY","OTA service ready");
         http_listening=1;
         for (;;) {
             client=accept(listener,NULL,NULL);

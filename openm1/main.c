@@ -9,6 +9,7 @@
 #include "m1_display.h"
 #include "network_health.h"
 #include "system_stats.h"
+#include "openm1_log.h"
 
 /* Implemented by the pinned SDK's MiCO/net/mocIP/mico/mico_socket.c. */
 extern char *sethostname(char *name);
@@ -21,14 +22,13 @@ static int boot_free_heap(void)
 static void boot_heap_log(const char *phase)
 {
     system_stats_note_heap(1);
-    printf("BOOT: free heap %s = %d\r\n",phase,boot_free_heap());
+    openm1_log_info("BOOT","free heap %s = %d",phase,boot_free_heap());
 }
 
 static void boot_log_init_error(const char *module,OSStatus error)
 {
     if (error!=kNoErr)
-        printf("BOOT: %s initialization failed: %d, free heap = %d\r\n",
-               module,error,boot_free_heap());
+        openm1_log_error("BOOT","%s init failed: %d, heap=%d",module,error,boot_free_heap());
 }
 
 #define OPENM1_HOUSEKEEPING_STACK 2048u
@@ -38,10 +38,15 @@ static void housekeeping_worker(mico_thread_arg_t arg)
     unsigned long counter=0;
     int network_health_started=0;
     micoMemInfo_t *memory;
+    uint32_t last_overflow_count=0;
     (void)arg;
     for (;;) {
         mico_thread_msleep(10000);
         system_stats_note_heap(0);
+        if (system_stats_stack_overflow_count()!=last_overflow_count) {
+            last_overflow_count=system_stats_stack_overflow_count();
+            openm1_log_error("SYSTEM","stack overflow detected, count=%lu",(unsigned long)last_overflow_count);
+        }
         if (!network_health_started && wifi_manager_control_running() &&
             wifi_manager_station_ready() && !system_stats_low_memory_safe_mode() &&
             system_stats_begin_optional_thread(NETWORK_HEALTH_WORKER_STACK)) {
@@ -76,9 +81,13 @@ int main(void)
     int mac_valid;
     static const unsigned retry_delay_ms[] = {500u,1000u};
 
+    result=openm1_log_init();
+    if (result!=kNoErr) printf("BOOT: RAM logger unavailable: %d\r\n",result);
+    openm1_log_info("BOOT","OpenM1 v0.6.6");
+
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.5\r\n"
+           "Version: 0.6.6\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -94,7 +103,7 @@ int main(void)
     /* Preserve the v0.0.3 hardware verified Wi-Fi sequence and delays. */
     printf("RECOVERY: MicoInit\r\n");
     result = MicoInit();
-    printf("RECOVERY: MicoInit result = %d\r\n", result);
+    openm1_log_info("BOOT","MicoInit result = %d", result);
     result=system_stats_init(); /* Mutexes and heap counters only; no CPU thread. */
     if (result!=kNoErr) system_stats_enter_safe_mode();
     boot_log_init_error("system stats",result);
@@ -104,10 +113,10 @@ int main(void)
     MicoGetRfVer(rf_version, sizeof(rf_version));
     rf_version[sizeof(rf_version) - 1] = '\0';
     recovery_set_rf(rf_version);
-    printf("RECOVERY: RF = %s\r\n", recovery_rf());
+    openm1_log_info("BOOT","RF = %s",recovery_rf());
     printf("RECOVERY: calling micoWlanPowerOn\r\n");
     result = micoWlanPowerOn();
-    printf("RECOVERY: micoWlanPowerOn result = %d\r\n", result);
+    openm1_log_info("BOOT","WlanPowerOn result = %d",result);
     mico_thread_msleep(500);
 
     /* The MOC wrapper returns void. Reject clearly invalid/uninitialized MACs. */
@@ -120,17 +129,17 @@ int main(void)
                  mac[3], mac[4], mac[5]);
         snprintf(mac_text, sizeof(mac_text), "%02X:%02X:%02X:%02X:%02X:%02X",
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        printf("RECOVERY: MAC = %s\r\n", mac_text);
+        openm1_log_info("BOOT","MAC = %s",mac_text);
     } else {
         printf("RECOVERY: MAC read failed, using fallback SSID\r\n");
     }
     recovery_set_identity(recovery_ssid, mac_text);
     recovery_prepare_hostname(mac,mac_valid);
     if (sethostname(recovery_hostname()))
-        printf("DEVICE: DHCP hostname = %s\r\n",recovery_hostname());
+        openm1_log_info("BOOT","DHCP hostname = %s",recovery_hostname());
     else
         printf("DEVICE: DHCP hostname setup unavailable\r\n");
-    printf("RECOVERY: SSID = %s\r\n", recovery_ssid);
+    openm1_log_info("RECOVERY","SSID = %s",recovery_ssid);
 
     printf("RECOVERY: starting SoftAP\r\n");
     memset(&wifi_config, 0, sizeof(wifi_config));
@@ -145,14 +154,14 @@ int main(void)
     ap_result=kGeneralErr;
     for (attempt=0;attempt<3;attempt++) {
         if (attempt) mico_thread_msleep(retry_delay_ms[attempt-1]);
-        printf("RECOVERY: SoftAP start attempt %u\r\n",attempt+1);
+        openm1_log_info("RECOVERY","SoftAP start attempt %u",attempt+1);
         printf("RECOVERY: calling StartNetwork(SoftAP)\r\n");
         ap_result=StartNetwork(&wifi_config);
-        printf("RECOVERY: StartNetwork(SoftAP) result = %d\r\n",ap_result);
+        openm1_log_info("RECOVERY","SoftAP result = %d",ap_result);
         if (ap_result==kNoErr) break;
     }
     if (ap_result==kNoErr) {
-        printf("RECOVERY: SoftAP ready\r\n");
+        openm1_log_info("RECOVERY","SoftAP ready");
         printf("RECOVERY: WiFi ready\r\n");
         printf("RECOVERY: IP = %s\r\n", RECOVERY_IP);
     } else {
@@ -166,20 +175,28 @@ int main(void)
         for (wait_count=0;wait_count<30 && !recovery_http_ready();wait_count++)
             mico_thread_msleep(100);
         if (!recovery_http_ready())
-            printf("RECOVERY: HTTP listener not ready yet; continuing boot\r\n");
+            openm1_log_warn("RECOVERY","HTTP listener not ready; boot continues");
+        else openm1_log_info("RECOVERY","HTTP ready");
     }
     printf("BOOT: phase 1 recovery ready\r\n");
     boot_heap_log("after HTTP");
-    boot_log_init_error("config",config_store_init());
+    result=config_store_init();
+    boot_log_init_error("config",result);
+    openm1_log_info("BOOT","config init result = %d",result);
     wifi_result=wifi_manager_init();
     boot_log_init_error("Wi-Fi manager",wifi_result);
+    openm1_log_info("BOOT","Wi-Fi manager init result = %d",wifi_result);
     if (wifi_result==kNoErr)
         wifi_manager_set_initial_ap_state(ap_result==kNoErr);
     system_stats_set_boot_phase("core");
-    boot_log_init_error("display",m1_display_init());
+    result=m1_display_init();
+    boot_log_init_error("display",result);
+    openm1_log_info("BOOT","display init result = %d",result);
     mico_thread_msleep(250);
     boot_heap_log("after display");
-    boot_log_init_error("UART",m1_uart_init());
+    result=m1_uart_init();
+    boot_log_init_error("UART",result);
+    openm1_log_info("BOOT","UART init result = %d",result);
     mico_thread_msleep(250);
     boot_heap_log("after UART");
     printf("BOOT: core services initialized\r\n");
@@ -193,14 +210,14 @@ int main(void)
     boot_heap_log("after Wi-Fi control");
     if (!wifi_manager_control_running()) {
         system_stats_enter_safe_mode();
-        printf("WIFI: control worker unavailable; entering Recovery safe mode\r\n");
+        openm1_log_error("WIFI","control worker unavailable; entering Recovery safe mode");
     } else {
         system_stats_set_boot_phase("wifi");
-        printf("BOOT: Wi-Fi control started\r\n");
+        openm1_log_info("WIFI","control worker ready");
         mico_thread_msleep(500);
         if (boot_free_heap()<(int)OPENM1_MIN_HEAP_RESERVE) {
             system_stats_enter_safe_mode();
-            printf("BOOT: low memory safe mode; optional workers deferred\r\n");
+            openm1_log_warn("BOOT","low memory safe mode");
         }
     }
     boot_heap_log("before MQTT");
@@ -213,6 +230,6 @@ int main(void)
                                    "openm1_housekeeping",housekeeping_worker,
                                    OPENM1_HOUSEKEEPING_STACK,0);
     boot_log_init_error("housekeeping",result);
-    printf("BOOT: main initialization complete; releasing app_thread\r\n");
+    openm1_log_info("BOOT","main release, free heap=%d",boot_free_heap());
     return 0;
 }

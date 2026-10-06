@@ -1,4 +1,5 @@
 #include "network_health.h"
+#include "openm1_log.h"
 #include "wifi_manager.h"
 #include "m1_display.h"
 #include "recovery.h"
@@ -28,6 +29,9 @@ static void apply_state(network_health_state_t state)
     m1_net_display_state_t target=state==NETWORK_ONLINE?M1_NET_DISPLAY_ONLINE:
         state==NETWORK_NO_INTERNET?M1_NET_DISPLAY_NO_INTERNET:M1_NET_DISPLAY_DISCONNECTED;
     m1_display_set_network_state(target);
+    if (state==NETWORK_NO_INTERNET) openm1_log_warn("NETWORK","NO_INTERNET after consecutive probe failures");
+    else if (state==NETWORK_ONLINE) openm1_log_info("NETWORK","ONLINE");
+    else if (state==NETWORK_NO_WIFI) openm1_log_info("NETWORK","NO_WIFI");
 }
 
 /* Nonblocking TCP connect with a bounded select. No payload is sent. */

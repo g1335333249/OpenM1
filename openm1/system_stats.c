@@ -1,4 +1,5 @@
 #include "system_stats.h"
+#include "openm1_log.h"
 #include "wifi_station_logic.h"
 #include "mico_hal/mico_flash.h"
 #include "recovery.h"
@@ -140,6 +141,7 @@ void system_stats_maybe_start_cpu(void)
 
 void system_stats_json(char *out,size_t capacity)
 {
+    openm1_log_status_t log_status;
     static const struct { mico_partition_t id; const char *name; } partitions[]={
         {MICO_PARTITION_BOOTLOADER,"bootloader"},
         {MICO_PARTITION_APPLICATION,"application"},
@@ -160,6 +162,7 @@ void system_stats_json(char *out,size_t capacity)
     size_t i,used=0;
     int n,count=0;
     if (!out || !capacity) return;
+    openm1_log_status(&log_status);
     system_stats_note_heap(0);
     if (stats_ready) {
         mico_rtos_lock_mutex(&stats_mutex);
@@ -208,7 +211,9 @@ void system_stats_json(char *out,size_t capacity)
         if (n<0 || (size_t)n>=capacity-used) goto overflow;
         used+=(size_t)n; count++;
     }
-    n=snprintf(out+used,capacity-used,"]}}");
+    n=snprintf(out+used,capacity-used,"]},\"log\":{\"memory_only\":true,\"capacity_records\":%u,\"count\":%u,\"wrap_count\":%lu,\"dropped_count\":%lu,\"ram_bytes\":%lu}}",
+               OPENM1_LOG_RECORD_COUNT,log_status.count,(unsigned long)log_status.wrap_count,
+               (unsigned long)log_status.dropped_count,(unsigned long)openm1_log_ram_bytes());
     if (n<0 || (size_t)n>=capacity-used) goto overflow;
     return;
 overflow:

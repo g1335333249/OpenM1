@@ -37,7 +37,7 @@ assert 'static void housekeeping_worker(' in main
 assert 'network_health_init()' in main.split('static void housekeeping_worker(',1)[1].split('int main(void)',1)[0]
 assert 'StartNetwork(' not in main.split('static void housekeeping_worker(',1)[1].split('int main(void)',1)[0]
 assert 'mico_rtos_create_thread(&housekeeping_thread' in main
-assert re.search(r'printf\("BOOT: main initialization complete; releasing app_thread.*?\n\s*return 0;\n}',main,re.S)
+assert re.search(r'openm1_log_info\("BOOT","main release.*?\n\s*return 0;\n}',main,re.S)
 assert 'static network_InitTypeDef_st wifi_config;' in main
 assert 'boot-rescue-window' in page and '开机救援窗口：剩余' in page
 assert 'PERMANENT_CRITICAL_STACK_BUDGET' in budget and 'TEMPORARY_OTA_STACK' in budget

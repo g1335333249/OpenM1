@@ -1,4 +1,5 @@
 #include "m1_display.h"
+#include "openm1_log.h"
 #include "m1_uart.h"
 #include "config_store.h"
 #include "recovery.h"
@@ -59,9 +60,9 @@ static void network_display_step(void)
     ready=state.network_pwm_ready;
     mico_rtos_unlock_mutex(&display_mutex);
     if (!ready) { mico_thread_msleep(1000); return; }
-    if (target!=previous) printf("DISPLAY: network -> %s\r\n",
-                                target==M1_NET_DISPLAY_DISCONNECTED?"blink":
-                                target==M1_NET_DISPLAY_ONLINE?"online":"no_internet");
+    if (target!=previous) openm1_log_info("DISPLAY","network -> %s",
+                                        target==M1_NET_DISPLAY_DISCONNECTED?"blink":
+                                        target==M1_NET_DISPLAY_ONLINE?"online":"no_internet");
     if (target==M1_NET_DISPLAY_DISCONNECTED) {
         bool next_on;
         mico_rtos_lock_mutex(&display_mutex);
@@ -91,7 +92,7 @@ static void network_display_worker(mico_thread_arg_t arg)
     mico_rtos_lock_mutex(&display_mutex);
     state.display_worker_running=true;
     mico_rtos_unlock_mutex(&display_mutex);
-    printf("DISPLAY: network PWM worker started\r\n");
+    openm1_log_info("DISPLAY","network PWM worker started");
     /* Initialize both outputs from this thread, the sole PWM Start/Stop owner. */
     if (network_pwm_set(M1_WIFI_ICON_PWM,false,true)!=kNoErr ||
         network_pwm_set(M1_RED_X_PWM,false,true)!=kNoErr) {
