@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.9
+PREFIX=OpenM1-v0.6.10
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 if [[ "$(uname -s)" == Darwin ]]; then BUILD_HOST_OS=OSX; else BUILD_HOST_OS=Linux64; fi
 TOOL=".micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/$BUILD_HOST_OS/bin"
@@ -19,6 +19,11 @@ python3 tests/test_v066_logs_static.py
 python3 tests/test_v067_mqtt_static.py
 python3 tests/test_v068_stability_static.py
 python3 tests/test_v069_ota_static.py
+python3 tests/test_v010_ha_brightness_static.py
+cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_ha_brightness.c openm1/ha_brightness.c -o /tmp/openm1-ha-brightness-test
+/tmp/openm1-ha-brightness-test
+cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_ha_discovery.c openm1/homeassistant.c -o /tmp/openm1-ha-discovery-test
+/tmp/openm1-ha-discovery-test
 cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_ota_transfer_logic.c openm1/ota_transfer_logic.c -o /tmp/openm1-ota-transfer-test
 /tmp/openm1-ota-transfer-test
 cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_worker_retry_logic.c openm1/worker_retry_logic.c -o /tmp/openm1-worker-retry-test
@@ -146,7 +151,7 @@ echo 'STA_VERIFIED_ON_HARDWARE=YES (v0.2.0)'
 echo 'WIFI_SCAN_FEATURE_PRESENT=YES; HARDWARE_VERIFIED=NO'
 echo 'WIFI_ICON_BLINK_AND_SOLID_HARDWARE_VERIFIED=YES; MANUAL_RED_X_HARDWARE_VERIFIED=YES; AUTOMATIC_NO_INTERNET_RED_X=NO'
 echo 'NETWORK_DISPLAY_EXECUTION=WORKER_THREAD; RTOS_TIMER=NO; NO NEW UART TX'
-echo 'MQTT_AND_HOMEASSISTANT_FEATURE_PRESENT=YES; HARDWARE_VERIFIED=NO'
+echo 'MQTT_AND_FOUR_HA_SENSORS_HARDWARE_VERIFIED=YES; HA_BRIGHTNESS_NUMBER_HARDWARE_VERIFIED=NO'
 echo 'SENSOR_UART_VERIFIED_ON_HARDWARE=YES (type 0x0C and 0x0F received)'
 echo 'SENSOR_PROTOCOL_STATUS=PARTIAL'
 echo 'DISPLAY_STARTUP_SYNC_PRESENT=YES'

@@ -1,10 +1,10 @@
-# OpenM1 v0.6.9
+# OpenM1 v0.6.10
 
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
 ## 实机验证状态
 
-用户已在真实 M1 上验证 Recovery SoftAP、动态 SSID、`192.168.4.1`、中文 Web 页面、AP+STA 家庭 Wi-Fi 连接、网页 OTA、Bootloader 应用升级及升级后自动恢复。UART1 的 `0x01` 传感器请求和四项解析数值已经与实体屏幕核对；`0x0C` 时间帧和 `0x0F` 亮度事件也已收到。OTA_TEMP 分区起始 `0x00110000`、长度 `0xB5000`（741376 字节）。v0.5.2 实机已验证 PWM5 控制的 Wi-Fi 图标闪烁和常亮、PWM4 控制的手动红 X 测试。**真实 WAN 断开后自动点亮红 X 的完整场景仍待验证。** v0.6.0 新增的配置保存、开机自动连接、AP 自动关闭/恢复和系统统计也待实机验证。URL OTA、扫描、MQTT 和 Home Assistant 尚未实机核对。
+用户已在真实 M1 上验证 Recovery SoftAP、动态 SSID、`192.168.4.1`、中文 Web 页面、AP+STA 家庭 Wi-Fi 连接、网页 OTA、Bootloader 应用升级及升级后自动恢复。UART1 的 `0x01` 传感器请求和四项解析数值已经与实体屏幕核对；`0x0C` 时间帧和 `0x0F` 亮度事件也已收到。OTA_TEMP 分区起始 `0x00110000`、长度 `0xB5000`（741376 字节）。v0.5.2 实机已验证 PWM5 控制的 Wi-Fi 图标闪烁和常亮、PWM4 控制的手动红 X 测试。**真实 WAN 断开后自动点亮红 X 的完整场景仍待验证。** v0.6.9 实机已验证 MQTT 连接、Home Assistant 自动发现及四个传感器实体；v0.6.10 的亮度 Number 控制仍待实机验证。URL OTA 与扫描仍待实机核对。
 
 v0.5.2 实机长期运行时曾发生真实家庭 Wi-Fi Station 掉线：路由器显示设备离线，原 Station IP 无法访问。精确根因尚未确认。v0.6.1 增加了常驻 Station supervisor、链路与 IP 防抖、运行期自动重连、递增退避、WLAN 状态缓存和 WLAN 控制串行化。
 
@@ -32,7 +32,7 @@ v0.6.9 本地 OTA 改为先 `POST /api/ota/prepare` 擦除 OTA_TEMP，再启动�
 
 访问 [http://192.168.4.1](http://192.168.4.1)。页面为单份内嵌 UTF-8 中文 HTML/CSS/JavaScript，无外部 CDN。七个 Tab 依次为首页、网络、MQTT、Home Assistant、固件升级、诊断、系统；URL hash 可直接打开指定 Tab，例如 `/#diagnostics`。页面只轮询当前 Tab 需要的状态，OTA 开始后则跨 Tab 持续轮询。OTA 重启时每 2 秒探测 `/api/health`，重新上线后刷新版本信息。
 
-RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.9-log.txt`，系统页“复制日志”使用同一完整文本流；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
+RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.10-log.txt`，系统页“复制日志”使用同一完整文本流；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
 
 | 路由 | 功能 |
 | --- | --- |
@@ -101,13 +101,13 @@ v0.5.1 在 150 ms RTOS timer callback 中调用互斥锁与 PWM HAL，HardFault 
 
 MQTT 使用 SDK 自带库；线程按需创建，且创建前必须保留 OTA 所需堆内存。支持普通 TCP、LWT、离线重连与 retained 传感器状态。Broker 配置保存在 MiCO 参数分区的应用 user data，带 magic、版本和 CRC32；MQTT 密码以明文存在本机 Flash，**不是加密保险库**，GET API 和日志不会返回密码。密码框留空会保留已保存密码，勾选“清除已保存的密码”才清除。设置细节见 [MQTT 文档](docs/mqtt.md)。
 
-Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置、MQTT 已启用、Broker 已连接时允许开启；否则返回 HTTP 409。四个传感器共享一个设备标识，关闭时删除 retained Discovery 配置。字段与主题见 [Home Assistant 文档](docs/homeassistant.md)。MQTT/Discovery 尚未实机验证，不能把编译成功视为 Broker 或 HA 连接成功。
+Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置、MQTT 已启用、Broker 已连接时允许开启；否则返回 HTTP 409。四个传感器和屏幕亮度 Number 共享一个设备标识，关闭时删除全部五个 retained Discovery 配置。现有四个传感器已在 v0.6.9 实机验证；新增亮度实体及下行控制仍待实机验证。字段与主题见 [Home Assistant 文档](docs/homeassistant.md)。
 
 ## OTA 格式与恢复
 
 完整 MOC OTA 由 Kernel、填充到 `0x75000`、8 字节 APP 头、APP payload、末尾 16 字节 raw MD5 组成。上传或 URL 下载时使用 2048 字节静态缓冲流式写入 `MICO_PARTITION_OTA_TEMP`，然后从 Flash 回读长度、两份 APP CRC、payload CRC 和整个 OTA（不含尾部 MD5）的 MD5；另外计算 boot table 所需 CRC16。验证成功才调用 `mico_ota_switch_to_new_fw(total_size - 16, boot_crc16)`，发送 HTTP 成功响应，等待两秒后 `MicoSystemReboot()`。任一校验失败不写升级标志、不重启。最大 OTA 文件限制为分区实际长度与 `0xB5000` 两者较小值。
 
-`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.9 的本地 OTA、长期 Station 与 MQTT 稳定性已通过实机验证。**
+`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.10 的本地 OTA、长期 Station 与 MQTT 稳定性已通过实机验证。**
 
 ## 构建与验证
 
@@ -125,9 +125,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.6.9@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.6.10@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.6.9.bin
+  --app dist/OpenM1-v0.6.10.bin
 ```
 
-GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.9`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.9 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
+GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.10`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.10 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。

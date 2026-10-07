@@ -21,7 +21,7 @@ symbols_valid = all(f'PASS {symbol}' in header for symbol in ('user_handler','mo
 sdk_valid = Path('mico-os').is_dir() and __import__('subprocess').check_output(['git','-C','mico-os','rev-parse','HEAD'], text=True).strip() == SDK_COMMIT
 kernel = require_sdk_kernel(a.sdk_kernel)
 valid = all(checks.values()) and header_valid and symbols_valid and sdk_valid and '5.4.1' in a.toolchain
-data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.9','board':'MK3080B','sdk_commit':SDK_COMMIT,
+data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.10','board':'MK3080B','sdk_commit':SDK_COMMIT,
         'kernel':'3080B002.023','kernel_version':'3080B002.023','sdk_kernel_version':'3080B002.023',
         'kernel_source':'mico-os/resources/moc_kernel/3080B/kernel.bin',
         'kernel_sha256':hashlib.sha256(kernel).hexdigest(),'interface_version':3,
@@ -69,9 +69,12 @@ data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.9','board':'MK3080B',
         'wifi_icon_hardware_verified':True,
         'wifi_icon_verified_on_hardware':True,
         'mqtt_feature_present':True,
-        'mqtt_verified_on_hardware':False,
+        'mqtt_verified_on_hardware':True,
         'homeassistant_discovery_present':True,
-        'homeassistant_discovery_verified_on_hardware':False,
+        'homeassistant_entity_count':5,
+        'homeassistant_brightness_number':True,
+        'homeassistant_brightness_hardware_verified':False,
+        'homeassistant_discovery_verified_on_hardware':True,
         'mqtt_config_storage':'MiCO parameter partition app user data',
         'mqtt_worker_stack':6144,
         'mqtt_select_bounded_read':True,

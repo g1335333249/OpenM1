@@ -5,6 +5,8 @@
 #include "homeassistant.h"
 #include "json_min.h"
 #include "m1_sensor.h"
+#include "m1_display.h"
+#include "ha_brightness.h"
 #include "recovery.h"
 #include "wifi_manager.h"
 #include "system_stats.h"
@@ -17,7 +19,7 @@
 
 typedef struct {
     char state[24];
-    char error[80];
+    char error[48];
     char failure_stage[24];
     char start_block_reason[24];
     uint32_t last_connect_ms,last_publish_ms,last_discovery_ms,publish_count;
@@ -25,7 +27,9 @@ typedef struct {
     uint32_t yield_fail_count,read_timeout_count,peer_close_count;
     uint32_t last_disconnect_ms,last_connected_duration_ms,connected_since_ms;
     uint32_t worker_retry_not_before_ms;
+    uint32_t subscribe_fail_count,last_brightness_command_ms,brightness_command_count,brightness_command_fail_count;
     int last_error_code,last_socket_read_result,last_socket_error,last_socket_write_result;
+    int last_subscribe_result,brightness_control_subscribed;
     int connected,ha_active;
 } mqtt_status_t;
 static mqtt_status_t status={{0}};
@@ -33,6 +37,18 @@ static mico_mutex_t status_mutex;
 static mico_thread_t worker_thread;
 static int manager_ready;
 static int worker_created,worker_creation_pending;
+/* MQTT callbacks run synchronously inside MQTTYield on the one MQTT worker. */
+static volatile ha_brightness_pending_t brightness_command;
+static const char *active_brightness_topic;
+static void brightness_message_callback(MessageData *data)
+{
+    size_t topic_length;
+    if (!data || !data->message || !data->topicName || !active_brightness_topic) return;
+    topic_length=strlen(active_brightness_topic);
+    if (data->topicName->lenstring.len!=(int)topic_length ||
+        memcmp(data->topicName->lenstring.data,active_brightness_topic,topic_length)) return;
+    ha_brightness_enqueue(&brightness_command,data->message->payload,data->message->payloadlen);
+}
 /* MQTTClient.c reallocates before receiving a body. Reject oversized broker
  * remaining-length fields while they are decoded, before that allocation. */
 static openm1_mqtt_read_state_t mqtt_read_state;
@@ -102,6 +118,7 @@ static void record_failure(mqtt_failure_stage_t stage,int code)
     snprintf(status.failure_stage,sizeof(status.failure_stage),"%s",mqtt_failure_stage_name(stage));
     status.last_error_code=code;
     if (stage==MQTT_STAGE_MQTT_CONNECT) status.mqtt_connect_fail_count++;
+    if (stage==MQTT_STAGE_SUBSCRIBE) {status.subscribe_fail_count++;status.last_subscribe_result=code;}
     if (mqtt_failure_is_publish(stage)) status.publish_fail_count++;
     if (mqtt_failure_is_yield(stage)) status.yield_fail_count++;
     mico_rtos_unlock_mutex(&status_mutex);
@@ -306,17 +323,20 @@ static int publish(Client *client,const char *topic,const char *payload,int reta
 static int publish_state(Client *client,const openm1_config_t *config)
 {
     m1_sensor_snapshot_t sensor;
+    m1_display_status_t display;
     char t[24],h[24],p[24],f[24],topic[150],payload[280];
     uint32_t now=mico_rtos_get_time();
-    int rc;
+    int rc,n;
     m1_sensor_get_snapshot(&sensor);
+    m1_display_get_status(&display);
     if (sensor.last_update_ms && now-sensor.last_update_ms<30000 && sensor.temperature_valid) snprintf(t,sizeof(t),"%.1f",(double)sensor.temperature); else strcpy(t,"null");
     if (sensor.last_update_ms && now-sensor.last_update_ms<30000 && sensor.humidity_valid) snprintf(h,sizeof(h),"%.1f",(double)sensor.humidity); else strcpy(h,"null");
     if (sensor.last_update_ms && now-sensor.last_update_ms<30000 && sensor.pm25_valid) snprintf(p,sizeof(p),"%u",(unsigned)sensor.pm25); else strcpy(p,"null");
     if (sensor.last_update_ms && now-sensor.last_update_ms<30000 && sensor.formaldehyde_valid) snprintf(f,sizeof(f),"%.3f",(double)sensor.formaldehyde); else strcpy(f,"null");
-    snprintf(topic,sizeof(topic),"%s/state",config->base_topic);
-    snprintf(payload,sizeof(payload),"{\"temperature\":%s,\"humidity\":%s,\"PM25\":%s,\"formaldehyde\":%s,\"uptime\":%lu,\"rssi\":%d}",
-             t,h,p,f,(unsigned long)(now/1000),wifi_manager_station_rssi());
+    n=snprintf(topic,sizeof(topic),"%s/state",config->base_topic);
+    if (n<0 || (size_t)n>=sizeof(topic)) return -1;
+    if (ha_brightness_format_state(payload,sizeof(payload),t,h,p,f,
+        display.brightness_level,now/1000,wifi_manager_station_rssi())) return -1;
     rc=publish(client,topic,payload,1);
     if (rc==MQTT_SUCCESS) {
         mico_rtos_lock_mutex(&status_mutex);
@@ -339,6 +359,7 @@ static void mqtt_worker(mico_thread_arg_t arg)
     Client client;
     MQTTPacket_connectData options=MQTTPacket_connectData_initializer;
     char availability[160];
+    char brightness_topic[160]; /* SDK retains this pointer until ClientDeinit. */
     unsigned backoff=5;
     uint32_t last_publish=0;
     int client_ready,connected,rc,write_result;
@@ -380,6 +401,23 @@ static void mqtt_worker(mico_thread_arg_t arg)
             goto close_network;
         }
         openm1_log_info("MQTT","CONNACK accepted");
+        brightness_command.pending=0;brightness_command.invalid=0;
+        rc=snprintf(brightness_topic,sizeof(brightness_topic),"%s/brightness/set",config.base_topic);
+        if (rc<0 || (size_t)rc>=sizeof(brightness_topic)) {
+            record_failure(MQTT_STAGE_SUBSCRIBE,-1);
+            openm1_log_error("MQTT","brightness subscribe topic too long");
+            goto close_network;
+        }
+        active_brightness_topic=brightness_topic;
+        rc=MQTTSubscribe(&client,brightness_topic,QOS0,brightness_message_callback);
+        if (rc!=MQTT_SUCCESS) {
+            record_failure(MQTT_STAGE_SUBSCRIBE,rc);
+            openm1_log_error("MQTT","brightness subscribe failed rc=%d",rc);
+            goto close_network;
+        }
+        mico_rtos_lock_mutex(&status_mutex);
+        status.brightness_control_subscribed=1;
+        mico_rtos_unlock_mutex(&status_mutex);
         connected=1;backoff=5;
         record_connected();
         set_state("connected","");
@@ -435,8 +473,41 @@ static void mqtt_worker(mico_thread_arg_t arg)
                 openm1_log_error("MQTT","MQTTYield failed rc=%d stage=%s",rc,mqtt_failure_stage_name(stage));
                 break;
             }
+            if (ha_brightness_take_invalid(&brightness_command)) {
+                mico_rtos_lock_mutex(&status_mutex);
+                status.brightness_command_fail_count++;
+                mico_rtos_unlock_mutex(&status_mutex);
+                openm1_log_warn("MQTT","invalid brightness command");
+            }
+            {
+                uint8_t level;
+                if (!ha_brightness_take(&brightness_command,recovery_ota_busy(),&level)) continue;
+                if (m1_display_set_brightness(level)!=0) {
+                    mico_rtos_lock_mutex(&status_mutex);
+                    status.brightness_command_fail_count++;
+                    mico_rtos_unlock_mutex(&status_mutex);
+                    openm1_log_warn("MQTT","brightness command failed");
+                    continue;
+                }
+                mico_rtos_lock_mutex(&status_mutex);
+                status.brightness_command_count++;
+                status.last_brightness_command_ms=mico_rtos_get_time();
+                mico_rtos_unlock_mutex(&status_mutex);
+                rc=publish_state(&client,&current);
+                if (rc) {
+                    record_failure(MQTT_STAGE_STATE_PUBLISH,rc);
+                    openm1_log_error("MQTT","brightness state publish failed rc=%d",rc);
+                    break;
+                }
+                last_publish=mico_rtos_get_time();
+            }
         }
 close_network:
+        active_brightness_topic=NULL;
+        brightness_command.pending=0;brightness_command.invalid=0;
+        mico_rtos_lock_mutex(&status_mutex);
+        status.brightness_control_subscribed=0;
+        mico_rtos_unlock_mutex(&status_mutex);
         if (connected) {
             record_disconnect();
             if (!recovery_ota_busy()) {
@@ -586,7 +657,10 @@ void mqtt_manager_status_json(char *out,size_t capacity)
         "\"mqtt_connect_fail_count\":%lu,\"publish_fail_count\":%lu,\"yield_fail_count\":%lu,"
         "\"read_timeout_count\":%lu,\"peer_close_count\":%lu,\"last_disconnect_ms\":%lu,"
         "\"last_connected_duration_ms\":%lu,\"last_socket_read_result\":%d,\"last_socket_error\":%d,"
-        "\"last_socket_write_result\":%d}",
+        "\"last_socket_write_result\":%d,\"brightness_control_subscribed\":%s,"
+        "\"subscribe_fail_count\":%lu,\"last_subscribe_result\":%d,"
+        "\"last_brightness_command_ms\":%lu,\"brightness_command_count\":%lu,"
+        "\"brightness_command_fail_count\":%lu}",
         config.host[0]?"true":"false",config.mqtt_enabled?"true":"false",state_name,
         config.host,config.port,username,config.password[0]?"true":"false",config.client_id,
         config.base_topic,created?"true":"false",pending?"true":"false",
@@ -600,7 +674,12 @@ void mqtt_manager_status_json(char *out,size_t capacity)
         (unsigned long)snapshot.yield_fail_count,(unsigned long)snapshot.read_timeout_count,
         (unsigned long)snapshot.peer_close_count,(unsigned long)snapshot.last_disconnect_ms,
         (unsigned long)snapshot.last_connected_duration_ms,snapshot.last_socket_read_result,
-        snapshot.last_socket_error,snapshot.last_socket_write_result);
+        snapshot.last_socket_error,snapshot.last_socket_write_result,
+        snapshot.brightness_control_subscribed?"true":"false",
+        (unsigned long)snapshot.subscribe_fail_count,snapshot.last_subscribe_result,
+        (unsigned long)snapshot.last_brightness_command_ms,
+        (unsigned long)snapshot.brightness_command_count,
+        (unsigned long)snapshot.brightness_command_fail_count);
 }
 void homeassistant_status_json(char *out,size_t capacity)
 {
@@ -609,7 +688,7 @@ void homeassistant_status_json(char *out,size_t capacity)
     config_store_get(&config);
     memset(&snapshot,0,sizeof(snapshot));
     if (manager_ready) {mico_rtos_lock_mutex(&status_mutex);snapshot=status;mico_rtos_unlock_mutex(&status_mutex);}
-    snprintf(out,capacity,"{\"enabled\":%s,\"active\":%s,\"discovery_prefix\":\"%s\",\"mqtt_ready\":%s,\"last_publish_ms\":%lu}",
+    snprintf(out,capacity,"{\"enabled\":%s,\"active\":%s,\"entity_count\":5,\"discovery_prefix\":\"%s\",\"mqtt_ready\":%s,\"last_publish_ms\":%lu}",
         config.ha_enabled?"true":"false",snapshot.ha_active?"true":"false",config.discovery_prefix,
         ha_policy_can_enable(config.host[0]!=0,config.mqtt_enabled,snapshot.connected)?"true":"false",
         (unsigned long)snapshot.last_discovery_ms);

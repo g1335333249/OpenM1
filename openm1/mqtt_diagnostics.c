@@ -8,6 +8,7 @@ const char *mqtt_failure_stage_name(mqtt_failure_stage_t stage)
     case MQTT_STAGE_TCP_SOCKET: return "tcp_socket";
     case MQTT_STAGE_TCP_CONNECT: return "tcp_connect";
     case MQTT_STAGE_MQTT_CONNECT: return "mqtt_connect";
+    case MQTT_STAGE_SUBSCRIBE: return "subscribe";
     case MQTT_STAGE_AVAILABILITY_PUBLISH: return "availability_publish";
     case MQTT_STAGE_HA_DISCOVERY: return "ha_discovery";
     case MQTT_STAGE_STATE_PUBLISH: return "state_publish";

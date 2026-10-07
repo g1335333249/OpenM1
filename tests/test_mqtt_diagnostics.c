@@ -6,6 +6,7 @@
 int main(void)
 {
     assert(strcmp(mqtt_failure_stage_name(MQTT_STAGE_MQTT_CONNECT),"mqtt_connect")==0);
+    assert(strcmp(mqtt_failure_stage_name(MQTT_STAGE_SUBSCRIBE),"subscribe")==0);
     assert(strcmp(mqtt_failure_stage_name(MQTT_STAGE_AVAILABILITY_PUBLISH),"availability_publish")==0);
     assert(strcmp(mqtt_failure_stage_name(MQTT_STAGE_HA_DISCOVERY),"ha_discovery")==0);
     assert(strcmp(mqtt_failure_stage_name(MQTT_STAGE_STATE_PUBLISH),"state_publish")==0);
