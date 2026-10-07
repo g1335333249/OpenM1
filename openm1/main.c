@@ -10,6 +10,7 @@
 #include "network_health.h"
 #include "system_stats.h"
 #include "openm1_log.h"
+#include "worker_retry_logic.h"
 
 /* Implemented by the pinned SDK's MiCO/net/mocIP/mico/mico_socket.c. */
 extern char *sethostname(char *name);
@@ -36,7 +37,8 @@ static mico_thread_t housekeeping_thread;
 static void housekeeping_worker(mico_thread_arg_t arg)
 {
     unsigned long counter=0;
-    int network_health_started=0,network_health_attempted=0;
+    int network_health_started=0,network_health_failed_once=0;
+    uint32_t network_health_failed_at=0,health_retry_remaining;
     micoMemInfo_t *memory;
     uint32_t last_overflow_count=0;
     uint32_t now,last_heartbeat_ms=mico_rtos_get_time(),fault_count,quiet_remaining;
@@ -55,20 +57,39 @@ static void housekeeping_worker(mico_thread_arg_t arg)
             openm1_log_error("SYSTEM","stack overflow task=%s count=%lu delta=%lu",
                              fault_task,(unsigned long)fault_count,(unsigned long)delta);
         }
-        if (!quiet_remaining && !network_health_attempted && wifi_manager_control_running() &&
-            wifi_manager_station_ready() && !recovery_ota_busy() && !system_stats_low_memory_safe_mode() &&
-            system_stats_begin_optional_thread(NETWORK_HEALTH_WORKER_STACK)) {
-            OSStatus health_result=network_health_init();
-            network_health_attempted=1;
-            network_health_started=health_result==kNoErr;
-            system_stats_end_thread_creation();
-            boot_log_init_error("network health",health_result);
-            boot_heap_log("after network health");
-            continue; /* Stagger optional thread creation. */
+        health_retry_remaining=network_health_retry_remaining(now,network_health_failed_at,network_health_failed_once);
+        if (!network_health_started) {
+            const char *reason="none";
+            if (!wifi_manager_control_running() || !wifi_manager_station_ready()) reason="waiting_station";
+            else if (recovery_ota_busy()) reason="ota_busy";
+            else if (quiet_remaining) reason="stack_fault_cooldown";
+            else if (system_stats_low_memory_safe_mode()) reason="low_memory";
+            else if (health_retry_remaining) reason="worker_create_failed";
+            else if (!system_stats_begin_optional_thread(NETWORK_HEALTH_WORKER_STACK)) reason="heap_reserve";
+            else {
+                OSStatus health_result;
+                network_health_set_start_diagnostic("none",0,1);
+                health_result=network_health_init();
+                network_health_started=health_result==kNoErr;
+                if (!network_health_started) {
+                    network_health_failed_once=1;
+                    network_health_failed_at=mico_rtos_get_time();
+                    reason="worker_create_failed";
+                    health_retry_remaining=NETWORK_HEALTH_RETRY_MS;
+                }
+                system_stats_end_thread_creation();
+                boot_log_init_error("network health",health_result);
+                boot_heap_log("after network health");
+                network_health_set_start_diagnostic(reason,health_retry_remaining,0);
+                continue; /* Stagger optional thread creation. */
+            }
+            network_health_set_start_diagnostic(reason,health_retry_remaining,0);
+        } else {
+            network_health_set_start_diagnostic("none",0,0);
         }
         if (now>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS && wifi_manager_control_running() &&
             !quiet_remaining && !system_stats_low_memory_safe_mode() && !recovery_ota_busy() &&
-            (!wifi_manager_station_ready() || network_health_started || network_health_attempted)) {
+            (!wifi_manager_station_ready() || network_health_started || network_health_failed_once)) {
             int mqtt_was_ready_for_cpu=mqtt_manager_ready_for_cpu();
             mqtt_manager_maybe_start(0);
             if (system_stats_stack_fault_cpu_ready() && mqtt_was_ready_for_cpu)
@@ -98,11 +119,11 @@ int main(void)
 
     result=openm1_log_init();
     if (result!=kNoErr) printf("BOOT: RAM logger unavailable: %d\r\n",result);
-    openm1_log_info("BOOT","OpenM1 v0.6.8");
+    openm1_log_info("BOOT","OpenM1 v0.6.9");
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.8\r\n"
+           "Version: 0.6.9\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");

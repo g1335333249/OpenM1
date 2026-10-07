@@ -3,9 +3,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.8
+PREFIX=OpenM1-v0.6.9
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
-TOOL=.micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/Linux64/bin
+if [[ "$(uname -s)" == Darwin ]]; then BUILD_HOST_OS=OSX; else BUILD_HOST_OS=Linux64; fi
+TOOL=".micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/$BUILD_HOST_OS/bin"
 [[ "$(git -C mico-os rev-parse HEAD)" == "$SDK_COMMIT" ]]
 echo '[PASS] SDK commit'
 python3 tools/embed_page.py --check
@@ -17,6 +18,11 @@ python3 tests/test_v065_hostname_static.py
 python3 tests/test_v066_logs_static.py
 python3 tests/test_v067_mqtt_static.py
 python3 tests/test_v068_stability_static.py
+python3 tests/test_v069_ota_static.py
+cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_ota_transfer_logic.c openm1/ota_transfer_logic.c -o /tmp/openm1-ota-transfer-test
+/tmp/openm1-ota-transfer-test
+cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_worker_retry_logic.c openm1/worker_retry_logic.c -o /tmp/openm1-worker-retry-test
+/tmp/openm1-worker-retry-test
 node tests/test_log_copy.js
 cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_mqtt_bounded_read.c openm1/mqtt_bounded_read.c -o /tmp/openm1-mqtt-read-test
 /tmp/openm1-mqtt-read-test
@@ -59,7 +65,7 @@ echo "$GCC_VERSION"
 [[ "$GCC_VERSION" == *5.4.1* ]]
 echo '[PASS] GCC 5.4.1'
 set -o pipefail
-make -f mico-os/makefiles/Makefile openm1@MK3080B@moc HOST_OS=Linux64 TOOLS_ROOT=./.micoder SOURCE_ROOT=./ VERBOSE=1 2>&1 | tee build.log
+make -f mico-os/makefiles/Makefile openm1@MK3080B@moc HOST_OS="$BUILD_HOST_OS" TOOLS_ROOT=./.micoder SOURCE_ROOT=./ PYTHON="$(command -v python3)" VERBOSE=1 2>&1 | tee build.log
 mkdir -p dist/recovery
 APP_BIN='build/openm1@MK3080B@moc/binary/openm1@MK3080B@moc.bin'
 [[ -f "$APP_BIN" ]]
@@ -89,7 +95,7 @@ done
 grep -Fq 'mico_notify_WIFI_SCAN_ADV_COMPLETED' openm1/wifi_manager.c
 grep -Fq 'micoWlanStartScanAdv()' openm1/wifi_manager.c
 echo '[PASS] SDK advanced scan callback and API'
-for route in /api/logs /api/logs/download /api/logs/clear /api/wifi/status /api/wifi/settings /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/system/stats /api/sensors /api/uart/status /api/uart/raw /api/uart/config /api/uart/init /api/uart/sensor-request /api/display/status /api/display/brightness /api/display/network-test /api/network/health /api/ota/status /api/ota/upload /api/ota/url /api/reboot /api/mqtt/status /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
+for route in /api/logs /api/logs/download /api/logs/clear /api/ota/prepare /api/wifi/status /api/wifi/settings /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/system/stats /api/sensors /api/uart/status /api/uart/raw /api/uart/config /api/uart/init /api/uart/sensor-request /api/display/status /api/display/brightness /api/display/network-test /api/network/health /api/ota/status /api/ota/upload /api/ota/url /api/reboot /api/mqtt/status /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
   if ! "$TOOL/arm-none-eabi-strings" "dist/$PREFIX.elf" | grep -F "$route" >/dev/null; then echo "[FAIL] missing route $route"; exit 1; fi
   echo "[PASS] $route"
 done
@@ -119,7 +125,16 @@ p=Path('dist/recovery/zM1-recovery.ota.bin')
 b=p.read_bytes()
 Path('dist/recovery/checksums.txt').write_text(f'size: {len(b)}\nMD5: {hashlib.md5(b).hexdigest()}\nSHA256: {hashlib.sha256(b).hexdigest()}\n')
 PY
-(cd dist && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+python3 - <<'PY_SUMS'
+from pathlib import Path
+import hashlib
+root=Path('dist')
+lines=[]
+for path in sorted(root.rglob('*')):
+    if path.is_file() and path.name!='SHA256SUMS.txt':
+        lines.append(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(root)}')
+(root/'SHA256SUMS.txt').write_text('\n'.join(lines)+'\n')
+PY_SUMS
 echo 'KERNEL_APP_SAME_SDK=YES'
 echo 'MOC_BOOT_VERIFIED=YES'
 echo 'MOC_APP_ENTRY_VERIFIED=YES'

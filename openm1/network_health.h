@@ -19,6 +19,7 @@ void network_health_step(network_health_snapshot_t *snapshot, int has_wifi, int 
 m1_net_display_state_t network_health_display_target(network_health_state_t state);
 OSStatus network_health_init(void);
 int network_health_available(void);
+void network_health_set_start_diagnostic(const char *reason,uint32_t retry_remaining_ms,int pending);
 void network_health_notify_link_down(void);
 void network_health_notify_link_ready(void);
 void network_health_status_json(char *out,size_t capacity);

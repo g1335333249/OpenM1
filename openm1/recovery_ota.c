@@ -1,6 +1,8 @@
 #include "recovery.h"
 #include "system_stats.h"
 #include "openm1_log.h"
+#include "ota_transfer_logic.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,8 +30,12 @@ static struct {
     const char *state;
     uint32_t received;
     uint32_t total;
-    char message[96];
+    char message[48];
     int active;
+    int prepared,peer_closed;
+    uint32_t prepared_at,recv_timeout_count,recv_retry_count,last_progress_ms,erase_duration_ms;
+    uint32_t flash_write_fail_count;
+    int last_recv_error;
 } status = {"idle", 0, 0, "", 0};
 static uint8_t io_buffer[RECOVERY_OTA_BUFFER];
 static char detected_kernel[16] = "unknown";
@@ -61,22 +67,68 @@ static void fail(const char *message)
 int recovery_ota_busy(void)
 {
     int active;
-    lock_status(); active = status.active; unlock_status();
+    lock_status();
+    if (status.prepared && ota_prepared_expired(mico_rtos_get_time(),status.prepared_at)) {
+        status.prepared=0;status.active=0;status.state="idle";
+        snprintf(status.message,sizeof(status.message),"Prepared upload expired");
+    }
+    active = status.active; unlock_status();
     return active;
+}
+int recovery_ota_prepare(void)
+{
+    mico_logic_partition_t *part;
+    uint32_t started;
+    OSStatus err;
+    (void)recovery_ota_busy();
+    if (!system_stats_begin_ota_thread(RECOVERY_OTA_STACK)) return -2;
+    lock_status();
+    if (!ota_prepare_can_begin(status.active)) { unlock_status();system_stats_end_thread_creation();return 0; }
+    status.active=1;status.prepared=0;status.state="preparing";
+    status.received=0;status.total=0;
+    snprintf(status.message,sizeof(status.message),"Preparing OTA partition");
+    unlock_status();
+    system_stats_end_thread_creation();
+    openm1_log_info("OTA","prepare begin");
+    part=MicoFlashGetInfo(MICO_PARTITION_OTA_TEMP);
+    if (!part) { fail("Flash partition unavailable");lock_status();status.active=0;unlock_status();return -1; }
+    set_status("erasing","Erasing Flash",0,0);
+    openm1_log_info("OTA","erase begin");
+    started=mico_rtos_get_time();
+    err=MicoFlashErase(MICO_PARTITION_OTA_TEMP,0,part->partition_length);
+    lock_status();status.erase_duration_ms=(uint32_t)(mico_rtos_get_time()-started);unlock_status();
+    if (err!=kNoErr) { fail("Flash erase failed");lock_status();status.active=0;unlock_status();return -1; }
+    openm1_log_info("OTA","erase complete duration=%lu ms",(unsigned long)status.erase_duration_ms);
+    lock_status();
+    status.prepared=1;status.prepared_at=mico_rtos_get_time();status.state="prepared";
+    snprintf(status.message,sizeof(status.message),"Waiting for upload");
+    unlock_status();
+    return 1;
 }
 void recovery_ota_status_json(char *out, size_t size)
 {
-    uint32_t received, total;
+    uint32_t received, total,time_ms,progress_ms,erase_ms,timeouts,retries,write_fails;
+    int recv_error,peer_closed;
     char state[20], message[96], kernel[16];
+    (void)recovery_ota_busy();
     lock_status();
     snprintf(state, sizeof(state), "%s", status.state);
     snprintf(message, sizeof(message), "%s", status.message);
     snprintf(kernel, sizeof(kernel), "%s", detected_kernel);
     received = status.received; total = status.total;
+    progress_ms=status.last_progress_ms;erase_ms=status.erase_duration_ms;
+    timeouts=status.recv_timeout_count;retries=status.recv_retry_count;
+    write_fails=status.flash_write_fail_count;recv_error=status.last_recv_error;
+    peer_closed=status.peer_closed;
     unlock_status();
-    snprintf(out, size, "{\"state\":\"%s\",\"progress\":%lu,\"received\":%lu,\"total\":%lu,\"message\":\"%s\",\"detected_kernel\":\"%s\"}",
-             state, (unsigned long)(total ? (received * 100u / total) : 0),
-             (unsigned long)received, (unsigned long)total, message, kernel);
+    time_ms=mico_rtos_get_time();
+    snprintf(out, size, "{\"state\":\"%s\",\"progress\":%lu,\"progress_percent\":%lu,\"received\":%lu,\"total\":%lu,\"message\":\"%s\",\"detected_kernel\":\"%s\",\"recv_timeout_count\":%lu,\"recv_retry_count\":%lu,\"last_recv_error\":%d,\"last_progress_ms\":%lu,\"idle_ms\":%lu,\"erase_duration_ms\":%lu,\"flash_write_fail_count\":%lu,\"peer_closed\":%s}",
+             state, (unsigned long)(total ? ((uint64_t)received*100u/total) : 0),
+             (unsigned long)(total ? ((uint64_t)received*100u/total) : 0),
+             (unsigned long)received, (unsigned long)total, message, kernel,
+             (unsigned long)timeouts,(unsigned long)retries,recv_error,
+             (unsigned long)progress_ms,(unsigned long)(progress_ms?(uint32_t)(time_ms-progress_ms):0u),
+             (unsigned long)erase_ms,(unsigned long)write_fails,peer_closed?"true":"false");
 }
 void recovery_ota_partition_log(void)
 {
@@ -113,34 +165,95 @@ static int ota_receive(int socket_fd, uint32_t total, const uint8_t *initial, si
     mico_logic_partition_t *part=MicoFlashGetInfo(MICO_PARTITION_OTA_TEMP);
     volatile uint32_t offset=0;
     uint32_t received=0;
-    int count;
+    int count,socket_error,uploading=!strcmp(phase,"uploading");
+    uint32_t last_progress=mico_rtos_get_time();
     if (!part || total>part->partition_length || total>RECOVERY_MAX_OTA_SIZE || total<=APP_START+MD5_SIZE) {
         fail("OTA size exceeds partition or is too small"); return 0;
     }
-    printf("OTA: total = %lu\r\nOTA: erasing\r\n", (unsigned long)total);
-    set_status("erasing", "Erasing Flash", 0, total);
-    if (MicoFlashErase(MICO_PARTITION_OTA_TEMP, 0, part->partition_length)!=kNoErr) {
-        fail("Flash erase failed"); return 0;
+    openm1_log_info("OTA","%s begin total=%lu",uploading?"upload":"download",(unsigned long)total);
+    if (!uploading) {
+        uint32_t started=mico_rtos_get_time();
+        set_status("erasing", "Erasing Flash", 0, total);
+        openm1_log_info("OTA","erase begin");
+        if (MicoFlashErase(MICO_PARTITION_OTA_TEMP, 0, part->partition_length)!=kNoErr) {
+            fail("Flash erase failed"); return 0;
+        }
+        lock_status();status.erase_duration_ms=(uint32_t)(mico_rtos_get_time()-started);unlock_status();
+        openm1_log_info("OTA","erase complete duration=%lu ms",(unsigned long)status.erase_duration_ms);
     }
+    last_progress=mico_rtos_get_time();
     set_status(phase, !strcmp(phase,"uploading")?"Uploading":"Downloading", 0, total);
     if (initial_len) {
-        if (initial_len>total || MicoFlashWrite(MICO_PARTITION_OTA_TEMP,&offset,(uint8_t*)initial,initial_len)!=kNoErr) {
+        if (initial_len>total) { fail("Initial body exceeds OTA length"); return 0; }
+        if (MicoFlashWrite(MICO_PARTITION_OTA_TEMP,&offset,(uint8_t*)initial,initial_len)!=kNoErr) {
+            lock_status();status.flash_write_fail_count++;unlock_status();
             fail("Flash write failed"); return 0;
         }
         received=(uint32_t)initial_len;
+        last_progress=mico_rtos_get_time();
     }
+    lock_status();status.last_progress_ms=last_progress;unlock_status();
     while (received<total) {
+        ota_recv_result_t action;
+        fd_set readfds;
+        struct timeval wait;
+        int selected;
         uint32_t want=total-received;
         if (want>sizeof(io_buffer)) want=sizeof(io_buffer);
-        count=recv(socket_fd, io_buffer, want, 0);
-        if (count<=0) { fail(!strcmp(phase,"uploading")?"Upload interrupted":"Download interrupted"); return 0; }
-        if (MicoFlashWrite(MICO_PARTITION_OTA_TEMP,&offset,io_buffer,count)!=kNoErr) { fail("Flash write failed"); return 0; }
+        FD_ZERO(&readfds);FD_SET(socket_fd,&readfds);
+        wait.tv_sec=OTA_RECV_TIMEOUT_MS/1000u;
+        wait.tv_usec=(OTA_RECV_TIMEOUT_MS%1000u)*1000u;
+        errno=0;
+        selected=select(socket_fd+1,&readfds,NULL,NULL,&wait);
+        if (selected>0) {
+            errno=0;
+            count=recv(socket_fd, io_buffer, want, 0);
+            socket_error=count<0?errno:0;
+        } else {
+            count=-1;
+            socket_error=selected==0?EAGAIN:errno;
+        }
+        action=ota_recv_step(count,socket_error,mico_rtos_get_time(),last_progress,received,total);
+        if (action==OTA_RECV_RETRY) {
+            uint32_t retry_count;
+            lock_status();status.recv_retry_count++;status.last_recv_error=socket_error;
+            if (socket_error!=EINTR) status.recv_timeout_count++;
+            retry_count=status.recv_retry_count;
+            unlock_status();
+            if (retry_count==1 || retry_count%6u==0)
+                openm1_log_warn("OTA","recv waiting count=%lu idle=%lu ms",
+                    (unsigned long)retry_count,
+                    (unsigned long)(uint32_t)(mico_rtos_get_time()-last_progress));
+            set_status(phase,"Network waiting; retrying",received,total);
+            if (socket_error==EINTR || !socket_error) mico_thread_msleep(10);
+            continue;
+        }
+        if (action==OTA_RECV_STALLED) {
+            fail(uploading?"Upload stalled: no data for 60 seconds":"Download stalled: no data for 60 seconds");
+            return 0;
+        }
+        if (action==OTA_RECV_PEER_CLOSED) {
+            lock_status();status.peer_closed=1;unlock_status();
+            openm1_log_error("OTA","peer closed received=%lu total=%lu",(unsigned long)received,(unsigned long)total);
+            fail(uploading?"Upload peer closed":"Download peer closed");return 0;
+        }
+        if (action==OTA_RECV_SOCKET_ERROR) {
+            lock_status();status.last_recv_error=socket_error;unlock_status();
+            openm1_log_error("OTA","socket recv error=%d",socket_error);
+            fail(uploading?"Upload socket error":"Download socket error");return 0;
+        }
+        if (MicoFlashWrite(MICO_PARTITION_OTA_TEMP,&offset,io_buffer,count)!=kNoErr) {
+            lock_status();status.flash_write_fail_count++;unlock_status();
+            fail("Flash write failed"); return 0;
+        }
         received+=(uint32_t)count;
+        last_progress=mico_rtos_get_time();
+        lock_status();status.last_progress_ms=last_progress;unlock_status();
         set_status(phase,!strcmp(phase,"uploading")?"Uploading":"Downloading",received,total);
         if ((received&0x7fff)<(uint32_t)count || received==total)
-            printf("OTA: received %lu / %lu\r\n",(unsigned long)received,(unsigned long)total);
+            openm1_log_info("OTA","received %lu / %lu",(unsigned long)received,(unsigned long)total);
     }
-    printf("OTA: transfer complete\r\n");
+    openm1_log_info("OTA","transfer complete");
     return 1;
 }
 
@@ -272,7 +385,7 @@ static void recovery_ota_upload_handler(mico_thread_arg_t arg)
 {
     uint32_t total=job.length; uint16_t boot_crc=0; int ok=0;
     (void)arg;
-    if (!job.is_url) { int timeout_ms=15000; setsockopt(job.fd,SOL_SOCKET,SO_RCVTIMEO,&timeout_ms,sizeof(timeout_ms)); }
+    if (!job.is_url) { int timeout_ms=OTA_RECV_TIMEOUT_MS; setsockopt(job.fd,SOL_SOCKET,SO_RCVTIMEO,&timeout_ms,sizeof(timeout_ms)); }
     if (job.is_url) {
         char url[URL_LIMIT+1];
         memcpy(url,job.initial,job.initial_len); url[job.initial_len]=0;
@@ -299,14 +412,15 @@ static void recovery_ota_upload_handler(mico_thread_arg_t arg)
             set_status("rebooting","Upgrade verified; rebooting",total,total);
             recovery_send_json(job.fd,200,"{\"ok\":true,\"message\":\"OTA verified. Device will reboot.\"}");
             close(job.fd);
+            job.fd=-1;
             mico_thread_msleep(2000);
             openm1_log_info("OTA","reboot requested");
             MicoSystemReboot();
         }
     }
-    if (!ok || !strcmp(status.state,"failed"))
+    if (job.fd>=0 && (!ok || !strcmp(status.state,"failed")))
         recovery_send_json(job.fd,400,"{\"ok\":false,\"message\":\"OTA failed. See /api/ota/status for details.\"}");
-    close(job.fd);
+    if (job.fd>=0) close(job.fd);
     lock_status(); status.active=0; unlock_status();
     mico_rtos_delete_thread(NULL);
 }
@@ -315,12 +429,20 @@ int recovery_ota_begin(int fd, int is_url, uint32_t length, const uint8_t *initi
 {
     OSStatus result;
     if (initial_len>sizeof(job.initial) || (is_url && initial_len>URL_LIMIT)) return 0;
+    (void)recovery_ota_busy(); /* Expires an abandoned prepared slot. */
     if (!system_stats_begin_ota_thread(RECOVERY_OTA_STACK))
         return -2;
     lock_status();
-    if (status.active) { unlock_status(); system_stats_end_thread_creation(); return 0; }
+    if (!ota_upload_can_begin(status.active,status.prepared,is_url) ||
+        (!is_url && strcmp(status.state,"prepared"))) {
+        int missing_prepare=!is_url && !status.active;
+        unlock_status(); system_stats_end_thread_creation(); return missing_prepare?-3:0;
+    }
+    status.prepared=0;
     status.active=1; status.state=is_url?"downloading":"uploading";
     status.received=0; status.total=is_url?0:length;
+    status.recv_timeout_count=0;status.recv_retry_count=0;status.last_recv_error=0;
+    status.last_progress_ms=0;status.flash_write_fail_count=0;status.peer_closed=0;
     status.message[0]=0;
     strcpy(detected_kernel,"unknown");
     unlock_status();

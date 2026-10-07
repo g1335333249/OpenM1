@@ -37,7 +37,7 @@ for state in ('waiting_worker','waiting_network','deferred_stack_fault','deferre
               'connecting','connected','reconnecting'):
     assert state in mqtt+Path('openm1/mqtt_diagnostics.c').read_text(),state
 assert 'health.state=wifi_manager_station_ready()?NETWORK_CHECKING:NETWORK_NO_WIFI' in health
-assert 'snapshot.state=wifi_manager_station_ready()?NETWORK_CHECKING:NETWORK_NO_WIFI' in health
+assert 'int ready=wifi_manager_station_ready();' in health and 'snapshot.state=ready?NETWORK_CHECKING:NETWORK_NO_WIFI' in health
 assert 'if (state==NETWORK_NO_WIFI) return M1_NET_DISPLAY_DISCONNECTED' in health_state
 assert 'return M1_NET_DISPLAY_ONLINE; /* CHECKING means Station has link and IP. */' in health_state
 assert 'id="log-copy"' in page

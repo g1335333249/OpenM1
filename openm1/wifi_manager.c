@@ -374,6 +374,9 @@ static void wifi_control_worker(mico_thread_arg_t arg)
     openm1_log_info("WIFI","native retry interval = %u ms",WIFI_NATIVE_RETRY_INTERVAL_MS);
     for (;;) {
         uint32_t now=mico_rtos_get_time();
+        /* OTA owns the active transport. Do not probe, scan or mutate WLAN
+         * while prepare/upload/verification/activation holds the reservation. */
+        if (recovery_ota_busy()) { mico_thread_msleep(WIFI_CONTROL_INTERVAL_MS); continue; }
         uint32_t events=__atomic_exchange_n(&wifi_event_bits,0,__ATOMIC_ACQ_REL);
         int changed;
         if (events&WIFI_EVENT_AP_DOWN) openm1_log_warn("WIFI","AP_DOWN event received");
@@ -745,6 +748,7 @@ int wifi_manager_save_settings(const char *body,size_t length)
 int wifi_manager_connect(const char *ssid,const char *password)
 {
     size_t pass_len;
+    if (recovery_ota_busy()) return -2;
     if (!manager_ready || !control_worker_created || !WIFI_STA_CONNECT_SUPPORTED) return -3;
     if (!valid_input(ssid,sizeof(desired_station.ssid)-1) || !password) return -1;
     pass_len=strlen(password);
@@ -764,6 +768,7 @@ int wifi_manager_connect(const char *ssid,const char *password)
 }
 int wifi_manager_disconnect(void)
 {
+    if (recovery_ota_busy()) return -2;
     if (!manager_ready || !control_worker_created) return -1;
     lock_status();
     wifi_station_manual_disconnect(&desired_station);

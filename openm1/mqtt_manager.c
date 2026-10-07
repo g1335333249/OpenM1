@@ -397,7 +397,7 @@ static void mqtt_worker(mico_thread_arg_t arg)
                 record_failure(MQTT_STAGE_CONFIG_CHANGED,0);break;
             }
             if (!wifi_manager_station_ready()) {record_failure(MQTT_STAGE_WIFI_LOST,0);break;}
-            if (recovery_ota_busy()) {mico_thread_msleep(500);continue;}
+            if (recovery_ota_busy()) break; /* Release socket; reconnect after OTA. */
             mico_rtos_lock_mutex(&status_mutex);ha_active=status.ha_active;mico_rtos_unlock_mutex(&status_mutex);
             if (current.ha_enabled != ha_active) {
                 rc=homeassistant_publish(&client,&current,!current.ha_enabled);
@@ -439,8 +439,10 @@ static void mqtt_worker(mico_thread_arg_t arg)
 close_network:
         if (connected) {
             record_disconnect();
-            publish(&client,availability,"offline",1);
-            MQTTDisconnect(&client);
+            if (!recovery_ota_busy()) {
+                publish(&client,availability,"offline",1);
+                MQTTDisconnect(&client);
+            }
         }
         if (client_ready) MQTTClientDeinit(&client);
         MICO_disconnect(&network);

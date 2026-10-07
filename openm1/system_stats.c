@@ -153,6 +153,7 @@ static void cpu_sampler(mico_thread_arg_t arg)
     unsigned sample;
     (void)arg;
     for (;;) {
+        if (recovery_ota_busy()) { mico_thread_msleep(1000); continue; }
         iterations=0;
         start=mico_rtos_get_time();
         while ((uint32_t)(mico_rtos_get_time()-start)<SYSTEM_STATS_CPU_SAMPLE_MS)

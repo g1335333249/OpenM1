@@ -1,4 +1,4 @@
-# OpenM1 v0.6.8
+# OpenM1 v0.6.9
 
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
@@ -20,6 +20,8 @@ v0.6.7 针对实机 MQTT 在 CONNACK 成功后约 520–530 ms 反复断线的�
 
 v0.6.7 实机发现 Station 已连接、Network Health 已判 ONLINE，而 MQTT 永久停在 `waiting_network`。直接原因是 housekeeping 用历史 stack overflow 计数作为永久启动禁令。v0.6.8 改为最近异常安静 **30 秒**后继续启动 Network Health 与 MQTT，CPU sampler 额外等待至 **60 秒**；保留计数并记录最近任务名、阻断原因和 worker 创建状态。housekeeping 栈从 2048 增至 3072 字节，每秒检查启动条件，存活心跳仍每 10 秒输出一次。已连接 Station 的 Network Health 初始 `CHECKING` 现在保持 Wi-Fi 图标常亮、红 X 关闭，直到探测给出结果。系统页新增从完整 RAM 日志下载接口一键复制，兼容 HTTP 页面。**v0.6.8 的实机稳定性仍待验证。**
 
+v0.6.9 本地 OTA 改为先 `POST /api/ota/prepare` 擦除 OTA_TEMP，再启动浏览器文件正文上传。准备成功后 120 秒未上传会自动释放 OTA 占用；URL OTA 与已准备的本地上传互斥。上传使用单次 5 秒 socket 接收超时和自最后一个新字节起 60 秒的总空闲期限，分别诊断暂时接收超时、客户端关闭、socket 错误与 Flash 擦写失败。固定 SDK 的 `recv()` 转发到 MOC lwIP，未公开进一步的超时 errno 保证，因此兼容超时后 errno 为 0 的情况；真正断开的 TCP 连接不提供伪断点续传。OTA 期间 Wi-Fi control 暂停 WLAN HAL、扫描与受控重连，Network Health 停止主动探测，MQTT 释放连接并暂停重连/发布，CPU sampler 暂停采样，可选 worker 不再新建。仍须完整接收、从 Flash 读回验证 APP CRC / MD5 / Boot CRC 后才写升级标志。Network Health worker 创建失败会在 30 秒后重试，并报告阻断原因。**GitHub CI 不能代替真实 M1 的本地 OTA、断网与长期运行验证。**
+
 `main()` 创建 3072 字节 housekeeping 线程后返回，由固定 MOC `pre_main()` 删除原 4096 字节 app_thread，永久线程栈净减少约 1024 字节。housekeeping 只负责低频心跳、内存采样和可选服务懒启动，不调用 WLAN HAL。
 
 启动期只创建 Recovery HTTP、显示、UART 与唯一 Wi-Fi control 线程。Network Health 延迟到 Wi-Fi control 正常运行且 Station 就绪后启动；CPU sampler 至少等待 60 秒，MQTT 仅在已配置启用、Station 就绪、OTA 未运行、堆预留足够且最近栈异常已安静 30 秒后创建；手动点击“启动 MQTT”会保存启用状态，未满足条件时由 housekeeping 稍后自动启动。关键服务启动后堆不足 8192 字节，或 Wi-Fi control 不可用时进入 Recovery 安全模式，不启动这些可选 worker，也不自动重启。OTA worker 创建前要求空闲堆大于 5120 字节栈加 4096 字节安全余量；不足时 HTTP 503。`/api/system/stats` 报告启动期/运行期最低空闲堆、阶段、安全模式与栈溢出通知计数。Wi-Fi 故障通知只计数，由唯一控制线程处理 WLAN HAL。GCC `-fstack-usage` 和 ELF 堆区域预算是辅助静态检查，不能替代实机栈/堆观测。
@@ -30,7 +32,7 @@ v0.6.7 实机发现 Station 已连接、Network Health 已判 ONLINE，而 MQTT 
 
 访问 [http://192.168.4.1](http://192.168.4.1)。页面为单份内嵌 UTF-8 中文 HTML/CSS/JavaScript，无外部 CDN。七个 Tab 依次为首页、网络、MQTT、Home Assistant、固件升级、诊断、系统；URL hash 可直接打开指定 Tab，例如 `/#diagnostics`。页面只轮询当前 Tab 需要的状态，OTA 开始后则跨 Tab 持续轮询。OTA 重启时每 2 秒探测 `/api/health`，重新上线后刷新版本信息。
 
-RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.8-log.txt`，系统页“复制日志”使用同一完整文本流；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
+RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.9-log.txt`，系统页“复制日志”使用同一完整文本流；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
 
 | 路由 | 功能 |
 | --- | --- |
@@ -38,6 +40,7 @@ RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会�
 | `GET /api/health` | Recovery 存活检查 |
 | `GET /api/info` | 设备版本、RF、IP、运行时间、空闲堆 |
 | `GET /api/ota/status` | OTA 状态、进度和错误 |
+| `POST /api/ota/prepare` | 预检内存并擦除 OTA_TEMP，120 秒内等待本地上传 |
 | `POST /api/ota/upload` | 原始 `.ota.bin` 文件流上传 |
 | `POST /api/ota/url` | 从设备可访问的 HTTP URL 下载 |
 | `POST /api/reboot` | 受控重启 |
@@ -104,7 +107,7 @@ Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置
 
 完整 MOC OTA 由 Kernel、填充到 `0x75000`、8 字节 APP 头、APP payload、末尾 16 字节 raw MD5 组成。上传或 URL 下载时使用 2048 字节静态缓冲流式写入 `MICO_PARTITION_OTA_TEMP`，然后从 Flash 回读长度、两份 APP CRC、payload CRC 和整个 OTA（不含尾部 MD5）的 MD5；另外计算 boot table 所需 CRC16。验证成功才调用 `mico_ota_switch_to_new_fw(total_size - 16, boot_crc16)`，发送 HTTP 成功响应，等待两秒后 `MicoSystemReboot()`。任一校验失败不写升级标志、不重启。最大 OTA 文件限制为分区实际长度与 `0xB5000` 两者较小值。
 
-`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.8 的长期 Station 与 MQTT 稳定性已通过实机验证。**
+`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.9 的本地 OTA、长期 Station 与 MQTT 稳定性已通过实机验证。**
 
 ## 构建与验证
 
@@ -122,9 +125,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.6.8@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.6.9@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.6.8.bin
+  --app dist/OpenM1-v0.6.9.bin
 ```
 
-GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.8`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.8 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
+GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.9`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.9 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
