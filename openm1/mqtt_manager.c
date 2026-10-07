@@ -417,6 +417,7 @@ static void mqtt_worker(mico_thread_arg_t arg)
         }
         mico_rtos_lock_mutex(&status_mutex);
         status.brightness_control_subscribed=1;
+        status.last_subscribe_result=MQTT_SUCCESS;
         mico_rtos_unlock_mutex(&status_mutex);
         connected=1;backoff=5;
         record_connected();

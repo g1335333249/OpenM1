@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.10
+PREFIX=OpenM1-v0.6.11
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 if [[ "$(uname -s)" == Darwin ]]; then BUILD_HOST_OS=OSX; else BUILD_HOST_OS=Linux64; fi
 TOOL=".micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/$BUILD_HOST_OS/bin"
@@ -20,6 +20,7 @@ python3 tests/test_v067_mqtt_static.py
 python3 tests/test_v068_stability_static.py
 python3 tests/test_v069_ota_static.py
 python3 tests/test_v010_ha_brightness_static.py
+python3 tests/test_v011_stack_static.py
 cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_ha_brightness.c openm1/ha_brightness.c -o /tmp/openm1-ha-brightness-test
 /tmp/openm1-ha-brightness-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_ha_discovery.c openm1/homeassistant.c -o /tmp/openm1-ha-discovery-test
@@ -82,9 +83,11 @@ cp "$APP_MAP" "dist/$PREFIX.map"
 cp build.log dist/build.log
 echo '[PASS] MK3080B@moc build'
 python3 tools/verify_app.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --objdump "$TOOL/arm-none-eabi-objdump" --symbols dist/symbols.txt --report dist/app-header-report.txt
+python3 tools/verify_app_stack.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --objdump "$TOOL/arm-none-eabi-objdump" --app-header-report dist/app-header-report.txt --output dist/app-stack-report.txt
+python3 tests/test_app_stack_runtime.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --objdump "$TOOL/arm-none-eabi-objdump" --app-header-report dist/app-header-report.txt
 mkdir -p dist/stack-usage
 find build/openm1@MK3080B@moc -type f -name '*.su' -path '*/openm1/*' -exec cp {} dist/stack-usage/ \;
-python3 tools/check_stack_budget.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --su-dir dist/stack-usage --output dist/stack-budget.txt
+python3 tools/check_stack_budget.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --su-dir dist/stack-usage --app-stack-report dist/app-stack-report.txt --output dist/stack-budget.txt
 for symbol in recovery_http_server_thread recovery_ota_upload_handler recovery_ota_url_handler recovery_ota_verify_flash wifi_manager_init wifi_manager_connect wifi_manager_disconnect wifi_manager_status_json recovery_set_identity recovery_ssid recovery_mac recovery_hostname recovery_prepare_hostname sethostname wlan_get_mac_address mico_ota_switch_to_new_fw; do
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
@@ -121,7 +124,8 @@ python3 tools/make_ota.py --app "dist/$PREFIX.bin" --sdk-kernel "$KERNEL" --outp
 cmp "$OTA" "${APP_BIN%.bin}.ota.bin"
 echo '[PASS] Official SDK OTA match'
 python3 tools/verify_ota.py "$OTA" --sdk-kernel "$KERNEL" --app "dist/$PREFIX.bin" | tee dist/verify-report.txt
-python3 tools/generate_manifest.py --ota "$OTA" --app "dist/$PREFIX.bin" --sdk-kernel "$KERNEL" --app-header-report dist/app-header-report.txt --output dist/manifest.json --toolchain "$GCC_VERSION"
+cat dist/app-stack-report.txt >> dist/verify-report.txt
+python3 tools/generate_manifest.py --ota "$OTA" --app "dist/$PREFIX.bin" --sdk-kernel "$KERNEL" --app-header-report dist/app-header-report.txt --app-stack-report dist/app-stack-report.txt --output dist/manifest.json --toolchain "$GCC_VERSION"
 cp 'reference/zM1@MK3080B@moc.ota.bin' dist/recovery/zM1-recovery.ota.bin
 python3 - <<'PY'
 from pathlib import Path

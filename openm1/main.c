@@ -15,6 +15,10 @@
 /* Implemented by the pinned SDK's MiCO/net/mocIP/mico/mico_socket.c. */
 extern char *sethostname(char *name);
 
+/* Overrides MiCO/core/mico_config.c's weak 1500-byte runtime default.
+ * The separate MOC user header already declares a 4096-byte app stack. */
+uint32_t app_stack_size = 4096u;
+
 static int boot_free_heap(void)
 {
     micoMemInfo_t *memory=MicoGetMemoryInfo();
@@ -119,11 +123,12 @@ int main(void)
 
     result=openm1_log_init();
     if (result!=kNoErr) printf("BOOT: RAM logger unavailable: %d\r\n",result);
-    openm1_log_info("BOOT","OpenM1 v0.6.10");
+    openm1_log_info("BOOT","app_thread stack configured = %lu",(unsigned long)app_stack_size);
+    openm1_log_info("BOOT","OpenM1 v0.6.11");
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.10\r\n"
+           "Version: 0.6.11\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
