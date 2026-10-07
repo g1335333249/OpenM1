@@ -27,7 +27,7 @@ class Page(HTMLParser):
 source = Path('openm1/recovery_page.html').read_text(encoding='utf-8')
 page = Page()
 page.feed(source)
-expected = ['overview', 'network', 'mqtt', 'homeassistant', 'update', 'diagnostics', 'system']
+expected = ['overview', 'network', 'mqtt', 'homeassistant', 'update', 'diagnostics', 'api', 'system']
 assert page.tabs == expected and page.panels == expected
 assert len(page.ids) == len(set(page.ids)), 'duplicate HTML id'
 assert not page.external, 'external page resource'
@@ -68,4 +68,4 @@ assert 'wifiSettingsInitialized' in source and 'syncApOffControl' in source
 assert "if(activeTab==='system'&&now-lastTabTick>=3000)" in source
 assert "$('wifi-saved-password').value=''" in source
 assert 'password_nonempty' in source and 'Flash 存储' in source
-print('WEB_TABS_PASS: 7 tabs, hash, independent OTA polling, retained API and UTF-8')
+print('WEB_TABS_PASS: 8 tabs, hash, independent OTA polling, retained API and UTF-8')

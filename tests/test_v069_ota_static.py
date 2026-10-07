@@ -36,5 +36,5 @@ assert 'network_health_retry_remaining(' in main and 'network_health_failed_at=m
 assert 'NETWORK_HEALTH_RETRY_MS 30000u' in Path('openm1/worker_retry_logic.h').read_text()
 assert 'worker_retry_remaining_ms' in health and 'start_block_reason' in health
 assert 'system_stats_stack_fault_quiet_remaining_ms()' in main
-assert '0.6.11' in main and '0.6.11' in http and '0.6.11' in Path('tools/generate_manifest.py').read_text()
+assert '0.6.12' in main and '0.6.12' in http and '0.6.12' in Path('tools/generate_manifest.py').read_text()
 print('V069_OTA_STATIC_PASS')

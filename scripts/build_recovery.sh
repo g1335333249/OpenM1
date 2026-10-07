@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.11
+PREFIX=OpenM1-v0.6.12
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 if [[ "$(uname -s)" == Darwin ]]; then BUILD_HOST_OS=OSX; else BUILD_HOST_OS=Linux64; fi
 TOOL=".micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/$BUILD_HOST_OS/bin"
@@ -11,6 +11,8 @@ TOOL=".micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/$BUILD_HOST_OS/bin"
 echo '[PASS] SDK commit'
 python3 tools/embed_page.py --check
 python3 tests/test_web_tabs.py
+python3 tests/test_v012_api_console.py
+node tests/test_api_console.js
 python3 tests/test_v063_static.py
 python3 tests/test_v063_safety.py
 python3 tests/test_v064_static.py

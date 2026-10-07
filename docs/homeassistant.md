@@ -1,4 +1,4 @@
-# OpenM1 v0.6.11 Home Assistant MQTT Discovery
+# OpenM1 v0.6.12 Home Assistant MQTT Discovery
 
 Home Assistant 集成只使用 MQTT Discovery，不需要 HA Token、URL 或 REST API。后端启用门槛由 `ha_policy_can_enable` 执行：**Broker 已配置 + MQTT 已启用 + 当前已连接**。任一条件不满足，`POST /api/homeassistant/discovery` 返回 HTTP 409 和 `请先配置并启动 MQTT 服务。`。掉线时配置 `enabled` 可保持 true，运行状态 `active` 变 false，重连后自动重发 retained Discovery。
 
@@ -10,7 +10,7 @@ Home Assistant 集成只使用 MQTT Discovery，不需要 HA Token、URL 或 RES
 - `homeassistant/sensor/openm1_XXXXXX/formaldehyde/config`
 - `homeassistant/number/openm1_XXXXXX/brightness/config`
 
-四个 Sensor payload 均含 `state_topic=openm1/XXXXXX/state`、`availability_topic=openm1/XXXXXX/availability`、`payload_available=online`、`payload_not_available=offline`、`state_class=measurement`，以及同一设备标识 `openm1_XXXXXX`、Phicomm / OpenM1、M1、OpenM1 v0.6.11。若有 STA IP，配置网址指向 STA 地址，否则是 `192.168.4.1`。各字段：
+四个 Sensor payload 均含 `state_topic=openm1/XXXXXX/state`、`availability_topic=openm1/XXXXXX/availability`、`payload_available=online`、`payload_not_available=offline`、`state_class=measurement`，以及同一设备标识 `openm1_XXXXXX`、Phicomm / OpenM1、M1、OpenM1 v0.6.12。若有 STA IP，配置网址指向 STA 地址，否则是 `192.168.4.1`。各字段：
 
 | 对象 | name | value_template | unit | device_class |
 | --- | --- | --- | --- | --- |

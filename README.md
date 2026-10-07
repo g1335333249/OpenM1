@@ -1,4 +1,4 @@
-# OpenM1 v0.6.11
+# OpenM1 v0.6.12
 
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
@@ -24,6 +24,8 @@ v0.6.9 本地 OTA 改为先 `POST /api/ota/prepare` 擦除 OTA_TEMP，再启动�
 
 v0.6.11 修复启动期 `app_thread` 的实际栈大小：MOC Header 先前为 4096 字节，但固定 SDK 的弱 `app_stack_size` 变量实际初始化为 1500 字节。OpenM1 现在用强符号将运行时值设为 4096，并在 CI 中分别读取 Header 与 ELF `.data` 的四字节初始值；两者不一致会阻止 Artifact 构建。`main()` 返回后该启动线程仍由 MOC `pre_main()` 删除。`.su` 只描述单个函数的静态帧，不能代表完整的 SDK 初始化调用链。真实 M1 仍需至少五次冷启动/重启及数小时运行，确认 `stack_overflow_count` 始终为 0。
 
+v0.6.12 在 Recovery 管理页面新增独立的「API 调试」标签，按功能列出当前 16 个 GET 和 19 个 POST 接口。可搜索、筛选、手动执行、编辑 POST JSON、查看格式化响应及复制结果；HTTP 错误也显示完整响应，HTTP 页面可使用传统复制降级。涉及配置、断网、清空、升级准备或重启的操作先明确确认。二进制 OTA 上传及 URL OTA 继续进入现有「固件升级」页面，沿用 prepare-before-upload 和所有校验。调试页不会自动请求接口；真实 M1 的移动端可用性仍待实机验证。
+
 `main()` 创建 3072 字节 housekeeping 线程后返回，由固定 MOC `pre_main()` 删除当前 4096 字节 app_thread，永久线程栈净减少约 1024 字节。housekeeping 只负责低频心跳、内存采样和可选服务懒启动，不调用 WLAN HAL。
 
 启动期只创建 Recovery HTTP、显示、UART 与唯一 Wi-Fi control 线程。Network Health 延迟到 Wi-Fi control 正常运行且 Station 就绪后启动；CPU sampler 至少等待 60 秒，MQTT 仅在已配置启用、Station 就绪、OTA 未运行、堆预留足够且最近栈异常已安静 30 秒后创建；手动点击“启动 MQTT”会保存启用状态，未满足条件时由 housekeeping 稍后自动启动。关键服务启动后堆不足 8192 字节，或 Wi-Fi control 不可用时进入 Recovery 安全模式，不启动这些可选 worker，也不自动重启。OTA worker 创建前要求空闲堆大于 5120 字节栈加 4096 字节安全余量；不足时 HTTP 503。`/api/system/stats` 报告启动期/运行期最低空闲堆、阶段、安全模式与栈溢出通知计数。Wi-Fi 故障通知只计数，由唯一控制线程处理 WLAN HAL。GCC `-fstack-usage` 和 ELF 堆区域预算是辅助静态检查，不能替代实机栈/堆观测。
@@ -32,9 +34,11 @@ v0.6.11 修复启动期 `app_thread` 的实际栈大小：MOC Header 先前为 4
 
 ## 页面与接口
 
-访问 [http://192.168.4.1](http://192.168.4.1)。页面为单份内嵌 UTF-8 中文 HTML/CSS/JavaScript，无外部 CDN。七个 Tab 依次为首页、网络、MQTT、Home Assistant、固件升级、诊断、系统；URL hash 可直接打开指定 Tab，例如 `/#diagnostics`。页面只轮询当前 Tab 需要的状态，OTA 开始后则跨 Tab 持续轮询。OTA 重启时每 2 秒探测 `/api/health`，重新上线后刷新版本信息。
+访问 [http://192.168.4.1](http://192.168.4.1)。页面为单份内嵌 UTF-8 中文 HTML/CSS/JavaScript，无外部 CDN。八个 Tab 依次为首页、网络、MQTT、Home Assistant、固件升级、诊断、API 调试、系统；URL hash 可直接打开指定 Tab，例如 `/#api`。页面只轮询当前 Tab 需要的状态，OTA 开始后则跨 Tab 持续轮询。OTA 重启时每 2 秒探测 `/api/health`，重新上线后刷新版本信息。
 
-RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.11-log.txt`，系统页“复制日志”使用同一完整文本流；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
+「API 调试」提供固定同源路由目录，包含中文说明、方法/类型筛选、`/api/logs` 的 after 序号、POST JSON 编辑与语法校验。请求只由点击执行发出，一次只执行一个；结果显示 HTTP 状态、耗时、完成时间和 Content-Type，JSON 缩进，非 JSON 原文保留。复制优先用 Clipboard API，普通 HTTP 页面会退回 textarea 复制；结果文本始终可手动选中。调试台不会保存编辑框中的 Wi-Fi 或 MQTT 密码，也不会自动批量调用接口。修改配置、断网、清空日志、切换波特率、擦除 OTA_TEMP 及重启需要确认。OTA 上传仍须在「固件升级」页选择文件并完成准备、上传、Flash 回读和校验。
+
+RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.12-log.txt`，系统页“复制日志”使用同一完整文本流；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
 
 | 路由 | 功能 |
 | --- | --- |
@@ -109,7 +113,7 @@ Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置
 
 完整 MOC OTA 由 Kernel、填充到 `0x75000`、8 字节 APP 头、APP payload、末尾 16 字节 raw MD5 组成。上传或 URL 下载时使用 2048 字节静态缓冲流式写入 `MICO_PARTITION_OTA_TEMP`，然后从 Flash 回读长度、两份 APP CRC、payload CRC 和整个 OTA（不含尾部 MD5）的 MD5；另外计算 boot table 所需 CRC16。验证成功才调用 `mico_ota_switch_to_new_fw(total_size - 16, boot_crc16)`，发送 HTTP 成功响应，等待两秒后 `MicoSystemReboot()`。任一校验失败不写升级标志、不重启。最大 OTA 文件限制为分区实际长度与 `0xB5000` 两者较小值。
 
-`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.11 的本地 OTA、长期 Station 与 MQTT 稳定性已通过实机验证。**
+`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.12 的本地 OTA、长期 Station 与 MQTT 稳定性已通过实机验证。**
 
 ## 构建与验证
 
@@ -127,9 +131,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.6.11@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.6.12@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.6.11.bin
+  --app dist/OpenM1-v0.6.12.bin
 ```
 
-GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.11`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.11 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
+GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.12`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.12 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
