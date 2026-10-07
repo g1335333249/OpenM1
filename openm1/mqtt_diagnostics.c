@@ -38,3 +38,34 @@ int mqtt_failure_is_yield(mqtt_failure_stage_t stage)
     return stage==MQTT_STAGE_YIELD || stage==MQTT_STAGE_PEER_CLOSED ||
            stage==MQTT_STAGE_SOCKET_READ || stage==MQTT_STAGE_SOCKET_WRITE;
 }
+mqtt_start_block_t mqtt_start_block_decide(int enabled,int configured,int wifi_control,
+                                           int station_ready,int ota_busy,int low_memory,
+                                           unsigned stack_quiet_remaining_ms)
+{
+    if (!enabled) return MQTT_START_DISABLED;
+    if (!configured) return MQTT_START_NOT_CONFIGURED;
+    if (ota_busy) return MQTT_START_OTA_BUSY;
+    if (low_memory) return MQTT_START_LOW_MEMORY;
+    if (!wifi_control || !station_ready) return MQTT_START_WAITING_NETWORK;
+    if (stack_quiet_remaining_ms) return MQTT_START_STACK_FAULT_COOLDOWN;
+    return MQTT_START_NONE;
+}
+const char *mqtt_start_block_name(mqtt_start_block_t reason)
+{
+    switch (reason) {
+    case MQTT_START_DISABLED: return "disabled";
+    case MQTT_START_NOT_CONFIGURED: return "not_configured";
+    case MQTT_START_WAITING_NETWORK: return "waiting_network";
+    case MQTT_START_STACK_FAULT_COOLDOWN: return "stack_fault_cooldown";
+    case MQTT_START_LOW_MEMORY: return "low_memory";
+    case MQTT_START_OTA_BUSY: return "ota_busy";
+    default: return "none";
+    }
+}
+const char *mqtt_start_state_name(mqtt_start_block_t reason)
+{
+    if (reason==MQTT_START_DISABLED) return "disabled";
+    if (reason==MQTT_START_STACK_FAULT_COOLDOWN) return "deferred_stack_fault";
+    if (reason==MQTT_START_LOW_MEMORY) return "deferred_low_memory";
+    return "waiting_worker";
+}

@@ -6,6 +6,7 @@
 
 static micoMemInfo_t mem={3,100000,25000,75000};
 static int create_count;
+static uint32_t test_now;
 static void (*overflow_callback)(char *,void *);
 static mico_logic_partition_t ota={0x110000,0xB5000};
 micoMemInfo_t *MicoGetMemoryInfo(void) { return &mem; }
@@ -13,7 +14,7 @@ mico_logic_partition_t *MicoFlashGetInfo(mico_partition_t p) { return p==MICO_PA
 OSStatus mico_rtos_init_mutex(mico_mutex_t *m) { *m=1; return 0; }
 OSStatus mico_rtos_lock_mutex(mico_mutex_t *m) { assert(*m); return 0; }
 OSStatus mico_rtos_unlock_mutex(mico_mutex_t *m) { assert(*m); return 0; }
-uint32_t mico_rtos_get_time(void) { return 0; }
+uint32_t mico_rtos_get_time(void) { return test_now; }
 void mico_thread_msleep(uint32_t ms) { (void)ms; }
 int wifi_manager_control_running(void) { return 0; }
 int recovery_ota_busy(void) { return 0; }
@@ -36,15 +37,35 @@ int main(void)
     assert(system_stats_begin_optional_thread(SYSTEM_STATS_CPU_STACK));
     system_stats_end_thread_creation();
     assert(!system_stats_low_memory_safe_mode());
-    overflow_callback("test",0);
+    overflow_callback("openm1_housekeeping",0);
     assert(system_stats_stack_overflow_count()==1);
+    assert(system_stats_stack_fault_quiet_remaining_ms()==OPENM1_STACK_FAULT_QUIET_MS);
+    {
+        char task[OPENM1_STACK_TASK_NAME_MAX];
+        system_stats_last_stack_overflow_task(task,sizeof(task));
+        assert(strcmp(task,"openm1_housekeeping")==0);
+    }
+    test_now=29000;
+    assert(system_stats_stack_fault_quiet_remaining_ms()==1000);
+    test_now=30000;
+    assert(system_stats_stack_fault_quiet_remaining_ms()==0);
+    assert(!system_stats_stack_fault_cpu_ready());
+    test_now=60000;
+    assert(system_stats_stack_fault_cpu_ready());
+    overflow_callback("mqtt",0);
+    assert(system_stats_stack_fault_quiet_remaining_ms()==OPENM1_STACK_FAULT_QUIET_MS);
+    test_now=90000;
+    assert(system_stats_stack_fault_quiet_remaining_ms()==0);
     system_stats_json(out,sizeof(out));
     assert(strstr(out,"\"ready\":false") && strstr(out,"\"usage_percent\":null"));
     assert(strstr(out,"\"total_bytes\":100000") && strstr(out,"\"used_percent\":25"));
     assert(strstr(out,"\"start\":1114112") && strstr(out,"\"length\":741376"));
     assert(strstr(out,"\"boot_min_free_bytes\":75000"));
     assert(strstr(out,"\"runtime_min_free_bytes\":75000"));
-    assert(strstr(out,"\"stack_overflow_count\":1"));
+    assert(strstr(out,"\"stack_overflow_count\":2"));
+    assert(strstr(out,"\"last_stack_overflow_task\":\"mqtt\""));
+    assert(strstr(out,"\"stack_overflow_recent\":false"));
+    assert(strstr(out,"\"stack_fault_quiet_remaining_ms\":0"));
     system_stats_json(tiny,sizeof(tiny));
     assert(tiny[sizeof(tiny)-1]==0 || tiny[0]=='{');
     mem.free_memory=RECOVERY_OTA_STACK+OPENM1_OTA_HEAP_RESERVE;

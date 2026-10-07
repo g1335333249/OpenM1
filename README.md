@@ -1,4 +1,4 @@
-# OpenM1 v0.6.7
+# OpenM1 v0.6.8
 
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
@@ -18,9 +18,11 @@ v0.6.6 新增 24 条固定记录的 RAM 环形系统日志。OpenM1 自身的重
 
 v0.6.7 针对实机 MQTT 在 CONNACK 成功后约 520–530 ms 反复断线的现象，移除 MQTT socket 的 500 ms 收发超时，改用 `select()` 和读取回调传入的总 deadline 等待下行数据。没有下行数据返回 0，交由固定 SDK 的 `MQTTYield` 正常执行 30 秒 keepalive；真正 peer close、socket 错误和超过 1024 字节的 MQTT Remaining Length 才返回负错误。状态接口新增失败阶段、返回码、连接/断线次数、发布失败、读取超时和 peer close 计数；RAM 日志只记录连接与真实故障，不记录每次正常 idle。**该修复仍待真实 Broker 长时间验证。**
 
-`main()` 创建 2048 字节 housekeeping 线程后返回，由固定 MOC `pre_main()` 删除原 4096 字节 app_thread，永久线程栈净减少约 2048 字节。housekeeping 只负责低频心跳、内存采样和可选服务懒启动，不调用 WLAN HAL。
+v0.6.7 实机发现 Station 已连接、Network Health 已判 ONLINE，而 MQTT 永久停在 `waiting_network`。直接原因是 housekeeping 用历史 stack overflow 计数作为永久启动禁令。v0.6.8 改为最近异常安静 **30 秒**后继续启动 Network Health 与 MQTT，CPU sampler 额外等待至 **60 秒**；保留计数并记录最近任务名、阻断原因和 worker 创建状态。housekeeping 栈从 2048 增至 3072 字节，每秒检查启动条件，存活心跳仍每 10 秒输出一次。已连接 Station 的 Network Health 初始 `CHECKING` 现在保持 Wi-Fi 图标常亮、红 X 关闭，直到探测给出结果。系统页新增从完整 RAM 日志下载接口一键复制，兼容 HTTP 页面。**v0.6.8 的实机稳定性仍待验证。**
 
-启动期只创建 Recovery HTTP、显示、UART 与唯一 Wi-Fi control 线程。Network Health 延迟到 Wi-Fi control 正常运行且 Station 就绪后启动；CPU sampler 至少等待 60 秒，MQTT 仅在启用且 Station 就绪或用户手动启动时创建。关键服务启动后堆不足 8192 字节，或 Wi-Fi control 不可用时进入 Recovery 安全模式，不启动这些可选 worker，也不自动重启。OTA worker 创建前要求空闲堆大于 5120 字节栈加 4096 字节安全余量；不足时 HTTP 503。`/api/system/stats` 报告启动期/运行期最低空闲堆、阶段、安全模式与栈溢出通知计数。Wi-Fi 故障通知只计数，由唯一控制线程处理 WLAN HAL。GCC `-fstack-usage` 和 ELF 堆区域预算是辅助静态检查，不能替代实机栈/堆观测。
+`main()` 创建 3072 字节 housekeeping 线程后返回，由固定 MOC `pre_main()` 删除原 4096 字节 app_thread，永久线程栈净减少约 1024 字节。housekeeping 只负责低频心跳、内存采样和可选服务懒启动，不调用 WLAN HAL。
+
+启动期只创建 Recovery HTTP、显示、UART 与唯一 Wi-Fi control 线程。Network Health 延迟到 Wi-Fi control 正常运行且 Station 就绪后启动；CPU sampler 至少等待 60 秒，MQTT 仅在已配置启用、Station 就绪、OTA 未运行、堆预留足够且最近栈异常已安静 30 秒后创建；手动点击“启动 MQTT”会保存启用状态，未满足条件时由 housekeeping 稍后自动启动。关键服务启动后堆不足 8192 字节，或 Wi-Fi control 不可用时进入 Recovery 安全模式，不启动这些可选 worker，也不自动重启。OTA worker 创建前要求空闲堆大于 5120 字节栈加 4096 字节安全余量；不足时 HTTP 503。`/api/system/stats` 报告启动期/运行期最低空闲堆、阶段、安全模式与栈溢出通知计数。Wi-Fi 故障通知只计数，由唯一控制线程处理 WLAN HAL。GCC `-fstack-usage` 和 ELF 堆区域预算是辅助静态检查，不能替代实机栈/堆观测。
 
 恢复热点名称由设备 Wi-Fi MAC 的最后 3 字节生成，格式为 **`OpenM1-XXXXXX`**，例如 MAC `34:EA:34:12:AB:CD` 对应 `OpenM1-12ABCD`。若 MAC 读取结果无效，则使用 `OpenM1-RECOVERY` 并输出故障日志。热点开放、无密码，地址固定为 `192.168.4.1/24`，DHCP Server 开启，HTTP 监听 TCP 80。**每次重启先启动恢复热点、HTTP 和 OTA；只有用户保存凭据并启用开机自动连接后，才会尝试连接家庭 Wi-Fi。** Wi-Fi 与 MQTT 密码保存在本机 MiCO 参数 Flash，未加密，不是保险库；GET API 与日志不返回密码。不要在不可信网络暴露此无认证管理界面。
 
@@ -28,7 +30,7 @@ v0.6.7 针对实机 MQTT 在 CONNACK 成功后约 520–530 ms 反复断线的�
 
 访问 [http://192.168.4.1](http://192.168.4.1)。页面为单份内嵌 UTF-8 中文 HTML/CSS/JavaScript，无外部 CDN。七个 Tab 依次为首页、网络、MQTT、Home Assistant、固件升级、诊断、系统；URL hash 可直接打开指定 Tab，例如 `/#diagnostics`。页面只轮询当前 Tab 需要的状态，OTA 开始后则跨 Tab 持续轮询。OTA 重启时每 2 秒探测 `/api/health`，重新上线后刷新版本信息。
 
-RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.7-log.txt`；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
+RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.8-log.txt`，系统页“复制日志”使用同一完整文本流；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
 
 | 路由 | 功能 |
 | --- | --- |
@@ -74,7 +76,7 @@ SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结�
 
 `POST /api/wifi/settings` 可提交 `{"ssid":"MyWiFi","password":"12345678","auto_connect":true,"disable_ap_after_connect":false}`。密码字段省略且 SSID 不变时保留原密码；改变 SSID 必须显式提交密码，开放网络用 `"password":""`。仅提交 `{"auto_connect":false}` 会同时清除自动关闭 AP 标记；`{"clear_saved_wifi":true}` 清除全部保存的 Wi-Fi 设置，但不断开当前 Station。未启用自动连接却要求关闭 AP 时返回 HTTP 409。`GET /api/wifi/settings` 只返回保存的 SSID、`credential_saved`、`password_nonempty` 和两个开关。
 
-系统 Tab 每 3 秒读取 `/api/system/stats`。CPU sampler 在开机稳定至少 30 秒且内存充足后才创建；该优先级 8 普通线程每 5 秒进行 100 ms 低优先级计数采样，是估算值而非 Kernel 精确计数，首份样本前显示 `--`。内存来自 `MicoGetMemoryInfo()`；Flash 仅展示 `MicoFlashGetInfo()` 的分区名称、起始地址和容量，不读取参数内容。设备没有文件系统，不显示虚构的磁盘使用率。
+系统 Tab 每 3 秒读取 `/api/system/stats`。CPU sampler 在开机至少 60 秒、栈异常连续安静至少 60 秒且内存充足后才创建；该优先级 8 普通线程每 5 秒进行 100 ms 低优先级计数采样，是估算值而非 Kernel 精确计数，首份样本前显示 `--`。内存来自 `MicoGetMemoryInfo()`；Flash 仅展示 `MicoFlashGetInfo()` 的分区名称、起始地址和容量，不读取参数内容。设备没有文件系统，不显示虚构的磁盘使用率。
 
 ## 传感器桥接与串口诊断
 
@@ -102,7 +104,7 @@ Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置
 
 完整 MOC OTA 由 Kernel、填充到 `0x75000`、8 字节 APP 头、APP payload、末尾 16 字节 raw MD5 组成。上传或 URL 下载时使用 2048 字节静态缓冲流式写入 `MICO_PARTITION_OTA_TEMP`，然后从 Flash 回读长度、两份 APP CRC、payload CRC 和整个 OTA（不含尾部 MD5）的 MD5；另外计算 boot table 所需 CRC16。验证成功才调用 `mico_ota_switch_to_new_fw(total_size - 16, boot_crc16)`，发送 HTTP 成功响应，等待两秒后 `MicoSystemReboot()`。任一校验失败不写升级标志、不重启。最大 OTA 文件限制为分区实际长度与 `0xB5000` 两者较小值。
 
-`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.7 的长期 Station 稳定性已通过实机验证。**
+`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.8 的长期 Station 与 MQTT 稳定性已通过实机验证。**
 
 ## 构建与验证
 
@@ -120,9 +122,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.6.7@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.6.8@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.6.7.bin
+  --app dist/OpenM1-v0.6.8.bin
 ```
 
-GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.7`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.7 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
+GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.8`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.8 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。

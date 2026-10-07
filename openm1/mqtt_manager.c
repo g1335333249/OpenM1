@@ -16,13 +16,15 @@
 #include <string.h>
 
 typedef struct {
-    char state[20];
+    char state[24];
     char error[80];
     char failure_stage[24];
+    char start_block_reason[24];
     uint32_t last_connect_ms,last_publish_ms,last_discovery_ms,publish_count;
     uint32_t connect_count,disconnect_count,mqtt_connect_fail_count,publish_fail_count;
     uint32_t yield_fail_count,read_timeout_count,peer_close_count;
     uint32_t last_disconnect_ms,last_connected_duration_ms,connected_since_ms;
+    uint32_t worker_retry_not_before_ms;
     int last_error_code,last_socket_read_result,last_socket_error,last_socket_write_result;
     int connected,ha_active;
 } mqtt_status_t;
@@ -144,6 +146,14 @@ static void set_state(const char *state,const char *error)
         else if (!strcmp(state,"disabled")) openm1_log_info("MQTT","disabled");
     }
 }
+static void set_start_block(const char *state,const char *reason,const char *error)
+{
+    mico_rtos_lock_mutex(&status_mutex);
+    snprintf(status.start_block_reason,sizeof(status.start_block_reason),"%s",reason);
+    mico_rtos_unlock_mutex(&status_mutex);
+    set_state(state,error);
+}
+#define MQTT_WORKER_CREATE_RETRY_MS 30000u
 static int valid_topic(const char *value,size_t max)
 {
     size_t i,n=strlen(value);
@@ -224,17 +234,13 @@ int mqtt_manager_configure(const char *body,size_t length)
 int mqtt_manager_start(void)
 {
     openm1_config_t config;
-    int started;
     if (!manager_ready) return -3;
     config_store_get(&config);
     if (!config.host[0]) return -2;
     config.mqtt_enabled=1;
     if (config_store_save(&config)!=kNoErr) return -3;
     mqtt_manager_maybe_start(1);
-    mico_rtos_lock_mutex(&status_mutex);
-    started=worker_created;
-    mico_rtos_unlock_mutex(&status_mutex);
-    return started?0:-4;
+    return 0; /* Enabled configuration starts automatically when prerequisites recover. */
 }
 int mqtt_manager_stop(void)
 {
@@ -243,7 +249,7 @@ int mqtt_manager_stop(void)
     config_store_get(&config);
     config.mqtt_enabled=0;
     if (config_store_save(&config)!=kNoErr) return -3;
-    set_state("disabled","");
+    set_start_block("disabled","disabled","");
     return 0;
 }
 int mqtt_manager_set_discovery(int enabled)
@@ -452,7 +458,8 @@ OSStatus mqtt_manager_init(void)
     OSStatus err=mico_rtos_init_mutex(&status_mutex);
     if (err!=kNoErr) return err;
     config_store_get(&config);
-    strcpy(status.state,config.mqtt_enabled?"waiting_network":"disabled");
+    strcpy(status.state,config.mqtt_enabled?"waiting_worker":"disabled");
+    strcpy(status.start_block_reason,config.mqtt_enabled?"waiting_network":"disabled");
     strcpy(status.failure_stage,"none");
     manager_ready=1;
     return kNoErr;
@@ -461,14 +468,29 @@ void mqtt_manager_maybe_start(int user_requested)
 {
     openm1_config_t config;
     OSStatus err;
-    if (!manager_ready || recovery_ota_busy()) return;
-    if (system_stats_low_memory_safe_mode()) {
-        set_state("deferred_low_memory","低内存安全模式，MQTT 已延迟");
+    int created,pending;
+    uint32_t retry_not_before_ms;
+    uint32_t next_retry_ms;
+    mqtt_start_block_t block;
+    (void)user_requested;
+    if (!manager_ready) return;
+    config_store_get(&config);
+    mico_rtos_lock_mutex(&status_mutex);
+    created=worker_created;pending=worker_creation_pending;
+    retry_not_before_ms=status.worker_retry_not_before_ms;
+    mico_rtos_unlock_mutex(&status_mutex);
+    if (created || pending) return;
+    if (retry_not_before_ms &&
+        (int32_t)(mico_rtos_get_time()-retry_not_before_ms)<0) return;
+    block=mqtt_start_block_decide(config.mqtt_enabled,config.host[0]!=0,
+        wifi_manager_control_running(),wifi_manager_station_ready(),recovery_ota_busy(),
+        system_stats_low_memory_safe_mode(),system_stats_stack_fault_quiet_remaining_ms());
+    if (block!=MQTT_START_NONE) {
+        set_start_block(mqtt_start_state_name(block),mqtt_start_block_name(block),
+                        block==MQTT_START_STACK_FAULT_COOLDOWN?"等待栈异常稳定":
+                        block==MQTT_START_LOW_MEMORY?"低内存安全模式，MQTT 已延迟":"");
         return;
     }
-    config_store_get(&config);
-    if (!config.mqtt_enabled || !config.host[0]) return;
-    if (!user_requested && !wifi_manager_station_ready()) return;
     mico_rtos_lock_mutex(&status_mutex);
     if (worker_created || worker_creation_pending) {
         mico_rtos_unlock_mutex(&status_mutex); return;
@@ -476,22 +498,38 @@ void mqtt_manager_maybe_start(int user_requested)
     worker_creation_pending=1;
     mico_rtos_unlock_mutex(&status_mutex);
     if (!system_stats_begin_optional_thread(MQTT_WORKER_STACK)) {
-        set_state("deferred_low_memory","内存不足，MQTT 稍后重试");
+        set_start_block("deferred_low_memory","heap_reserve","内存不足，MQTT 稍后重试");
         mico_rtos_lock_mutex(&status_mutex); worker_creation_pending=0; mico_rtos_unlock_mutex(&status_mutex);
         return;
     }
     printf("BOOT: free heap before MQTT worker = %d\r\n",system_stats_free_heap());
     err=mico_rtos_create_thread(&worker_thread,MICO_APPLICATION_PRIORITY,"openm1_mqtt",mqtt_worker,MQTT_WORKER_STACK,0);
     system_stats_end_thread_creation();
+    next_retry_ms=err==kNoErr?0u:mico_rtos_get_time()+MQTT_WORKER_CREATE_RETRY_MS;
     mico_rtos_lock_mutex(&status_mutex);
     worker_created=err==kNoErr;
     worker_creation_pending=0;
+    if (err==kNoErr) {
+        strcpy(status.start_block_reason,"none");
+    }
+    status.worker_retry_not_before_ms=next_retry_ms;
     mico_rtos_unlock_mutex(&status_mutex);
     printf("BOOT: free heap after MQTT worker = %d\r\n",system_stats_free_heap());
     if (err!=kNoErr) {
-        set_state("deferred_low_memory","MQTT worker 创建失败，稍后重试");
+        set_start_block("waiting_worker","worker_create_failed","MQTT worker 创建失败，稍后重试");
         printf("MQTT: worker start failed: %d, free heap = %d\r\n",err,system_stats_free_heap());
     }
+}
+int mqtt_manager_ready_for_cpu(void)
+{
+    openm1_config_t config;
+    int created;
+    if (!manager_ready) return 0;
+    config_store_get(&config);
+    mico_rtos_lock_mutex(&status_mutex);
+    created=worker_created;
+    mico_rtos_unlock_mutex(&status_mutex);
+    return created || !config.mqtt_enabled || !config.host[0];
 }
 static void json_escape(char *out,size_t cap,const char *in)
 {
@@ -508,21 +546,51 @@ void mqtt_manager_status_json(char *out,size_t capacity)
     openm1_config_t config;
     mqtt_status_t snapshot;
     char username[130];
+    const char *state_name,*block_reason;
+    int created,pending,station_ready,low_memory,ota_busy;
+    uint32_t quiet_remaining;
+    mqtt_start_block_t block;
     config_store_get(&config);
     memset(&snapshot,0,sizeof(snapshot));
-    if (manager_ready) {mico_rtos_lock_mutex(&status_mutex);snapshot=status;mico_rtos_unlock_mutex(&status_mutex);}
+    created=0;pending=0;
+    if (manager_ready) {
+        mico_rtos_lock_mutex(&status_mutex);
+        snapshot=status;created=worker_created;pending=worker_creation_pending;
+        mico_rtos_unlock_mutex(&status_mutex);
+    }
+    station_ready=wifi_manager_station_ready();
+    low_memory=system_stats_low_memory_safe_mode();
+    ota_busy=recovery_ota_busy();
+    quiet_remaining=system_stats_stack_fault_quiet_remaining_ms();
+    block=mqtt_start_block_decide(config.mqtt_enabled,config.host[0]!=0,
+        wifi_manager_control_running(),station_ready,ota_busy,low_memory,quiet_remaining);
+    state_name=snapshot.state;
+    block_reason=created?"none":mqtt_start_block_name(block);
+    if (!created) {
+        state_name=mqtt_start_state_name(block);
+        if (block==MQTT_START_NONE &&
+            (!strcmp(snapshot.start_block_reason,"heap_reserve") ||
+             !strcmp(snapshot.start_block_reason,"worker_create_failed")))
+            block_reason=snapshot.start_block_reason;
+    }
     json_escape(username,sizeof(username),config.username);
     snprintf(out,capacity,"{\"configured\":%s,\"enabled\":%s,\"state\":\"%s\",\"host\":\"%s\",\"port\":%u,"
         "\"username\":\"%s\",\"password_set\":%s,\"client_id\":\"%s\",\"base_topic\":\"%s\","
+        "\"worker_created\":%s,\"worker_creation_pending\":%s,\"station_ready\":%s,"
+        "\"start_block_reason\":\"%s\",\"stack_fault_quiet_remaining_ms\":%lu,"
+        "\"low_memory_safe_mode\":%s,\"ota_busy\":%s,"
         "\"publish_interval\":%u,\"last_connect_ms\":%lu,\"last_publish_ms\":%lu,\"publish_count\":%lu,\"error\":\"%s\","
         "\"failure_stage\":\"%s\",\"last_error_code\":%d,\"connect_count\":%lu,\"disconnect_count\":%lu,"
         "\"mqtt_connect_fail_count\":%lu,\"publish_fail_count\":%lu,\"yield_fail_count\":%lu,"
         "\"read_timeout_count\":%lu,\"peer_close_count\":%lu,\"last_disconnect_ms\":%lu,"
         "\"last_connected_duration_ms\":%lu,\"last_socket_read_result\":%d,\"last_socket_error\":%d,"
         "\"last_socket_write_result\":%d}",
-        config.host[0]?"true":"false",config.mqtt_enabled?"true":"false",snapshot.state,
+        config.host[0]?"true":"false",config.mqtt_enabled?"true":"false",state_name,
         config.host,config.port,username,config.password[0]?"true":"false",config.client_id,
-        config.base_topic,config.publish_interval,(unsigned long)snapshot.last_connect_ms,
+        config.base_topic,created?"true":"false",pending?"true":"false",
+        station_ready?"true":"false",block_reason,(unsigned long)quiet_remaining,
+        low_memory?"true":"false",ota_busy?"true":"false",
+        config.publish_interval,(unsigned long)snapshot.last_connect_ms,
         (unsigned long)snapshot.last_publish_ms,(unsigned long)snapshot.publish_count,snapshot.error,
         snapshot.failure_stage,snapshot.last_error_code,
         (unsigned long)snapshot.connect_count,(unsigned long)snapshot.disconnect_count,

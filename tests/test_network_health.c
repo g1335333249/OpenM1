@@ -10,6 +10,7 @@ int main(void)
     assert(s.state==NETWORK_NO_WIFI);
     network_health_step(&s,1,-1);
     assert(s.state==NETWORK_CHECKING);
+    assert(network_health_display_target(s.state)==M1_NET_DISPLAY_ONLINE);
     network_health_step(&s,1,1);
     assert(s.state==NETWORK_CHECKING);
     network_health_step(&s,1,1);
@@ -18,11 +19,13 @@ int main(void)
     assert(s.state==NETWORK_ONLINE); /* one failed probe does not change icon target */
     network_health_step(&s,1,0);
     assert(s.state==NETWORK_NO_INTERNET);
+    assert(network_health_display_target(s.state)==M1_NET_DISPLAY_NO_INTERNET);
     network_health_step(&s,1,1);
     assert(s.state==NETWORK_NO_INTERNET);
     network_health_step(&s,1,1);
     assert(s.state==NETWORK_ONLINE);
     network_health_step(&s,0,-1);
     assert(s.state==NETWORK_NO_WIFI && s.consecutive_successes==0 && s.consecutive_failures==0);
+    assert(network_health_display_target(s.state)==M1_NET_DISPLAY_DISCONNECTED);
     return 0;
 }

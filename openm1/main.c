@@ -31,40 +31,55 @@ static void boot_log_init_error(const char *module,OSStatus error)
         openm1_log_error("BOOT","%s init failed: %d, heap=%d",module,error,boot_free_heap());
 }
 
-#define OPENM1_HOUSEKEEPING_STACK 2048u
+#define OPENM1_HOUSEKEEPING_STACK 3072u
 static mico_thread_t housekeeping_thread;
 static void housekeeping_worker(mico_thread_arg_t arg)
 {
     unsigned long counter=0;
-    int network_health_started=0;
+    int network_health_started=0,network_health_attempted=0;
     micoMemInfo_t *memory;
     uint32_t last_overflow_count=0;
+    uint32_t now,last_heartbeat_ms=mico_rtos_get_time(),fault_count,quiet_remaining;
+    char fault_task[OPENM1_STACK_TASK_NAME_MAX];
     (void)arg;
     for (;;) {
-        mico_thread_msleep(10000);
+        mico_thread_msleep(1000);
+        now=mico_rtos_get_time();
         system_stats_note_heap(0);
-        if (system_stats_stack_overflow_count()!=last_overflow_count) {
-            last_overflow_count=system_stats_stack_overflow_count();
-            openm1_log_error("SYSTEM","stack overflow detected, count=%lu",(unsigned long)last_overflow_count);
+        fault_count=system_stats_stack_overflow_count();
+        quiet_remaining=system_stats_stack_fault_quiet_remaining_ms();
+        if (fault_count!=last_overflow_count) {
+            uint32_t delta=fault_count-last_overflow_count;
+            last_overflow_count=fault_count;
+            system_stats_last_stack_overflow_task(fault_task,sizeof(fault_task));
+            openm1_log_error("SYSTEM","stack overflow task=%s count=%lu delta=%lu",
+                             fault_task,(unsigned long)fault_count,(unsigned long)delta);
         }
-        if (!network_health_started && wifi_manager_control_running() &&
-            wifi_manager_station_ready() && !system_stats_low_memory_safe_mode() &&
+        if (!quiet_remaining && !network_health_attempted && wifi_manager_control_running() &&
+            wifi_manager_station_ready() && !recovery_ota_busy() && !system_stats_low_memory_safe_mode() &&
             system_stats_begin_optional_thread(NETWORK_HEALTH_WORKER_STACK)) {
-            network_health_started=1;
-            boot_log_init_error("network health",network_health_init());
+            OSStatus health_result=network_health_init();
+            network_health_attempted=1;
+            network_health_started=health_result==kNoErr;
             system_stats_end_thread_creation();
+            boot_log_init_error("network health",health_result);
             boot_heap_log("after network health");
+            continue; /* Stagger optional thread creation. */
         }
-        if (mico_rtos_get_time()>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS &&
-            wifi_manager_control_running() &&
-            !system_stats_stack_overflow_count() && !system_stats_low_memory_safe_mode()) {
+        if (now>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS && wifi_manager_control_running() &&
+            !quiet_remaining && !system_stats_low_memory_safe_mode() && !recovery_ota_busy() &&
+            (!wifi_manager_station_ready() || network_health_started || network_health_attempted)) {
+            int mqtt_was_ready_for_cpu=mqtt_manager_ready_for_cpu();
             mqtt_manager_maybe_start(0);
-            mico_thread_msleep(300);
-            system_stats_maybe_start_cpu();
+            if (system_stats_stack_fault_cpu_ready() && mqtt_was_ready_for_cpu)
+                system_stats_maybe_start_cpu();
         }
-        memory=MicoGetMemoryInfo();
-        printf("RECOVERY: alive %lu, free heap = %d\r\n",++counter,
-               memory?memory->free_memory:-1);
+        if ((uint32_t)(now-last_heartbeat_ms)>=10000u) {
+            last_heartbeat_ms=now;
+            memory=MicoGetMemoryInfo();
+            printf("RECOVERY: alive %lu, free heap = %d\r\n",++counter,
+                   memory?memory->free_memory:-1);
+        }
     }
 }
 
@@ -83,11 +98,11 @@ int main(void)
 
     result=openm1_log_init();
     if (result!=kNoErr) printf("BOOT: RAM logger unavailable: %d\r\n",result);
-    openm1_log_info("BOOT","OpenM1 v0.6.7");
+    openm1_log_info("BOOT","OpenM1 v0.6.8");
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.7\r\n"
+           "Version: 0.6.8\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");

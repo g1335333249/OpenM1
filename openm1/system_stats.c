@@ -11,15 +11,32 @@ static mico_mutex_t stats_mutex;
 static mico_mutex_t thread_creation_mutex;
 static mico_thread_t cpu_thread;
 static int stats_ready,thread_creation_ready,cpu_sample_ready,cpu_thread_started,low_memory_safe_mode;
+static uint32_t cpu_retry_not_before_ms;
 static int current_free_heap,boot_min_free_heap,runtime_min_free_heap;
 static char boot_phase[16]="recovery";
 static volatile uint32_t stack_overflow_count;
+static volatile char last_stack_overflow_task[OPENM1_STACK_TASK_NAME_MAX]="none";
+static uint32_t last_seen_stack_overflow_count,last_stack_fault_observed_ms;
 static unsigned cpu_usage_percent;
 static uint32_t max_idle_iterations;
 
 static void stack_overflow_notice(char *taskname,void *arg)
 {
-    (void)taskname; (void)arg;
+    unsigned i=0;
+    (void)arg;
+    if (taskname) {
+        while (i<OPENM1_STACK_TASK_NAME_MAX-1u && taskname[i]) {
+            unsigned char c=(unsigned char)taskname[i];
+            last_stack_overflow_task[i]=(c>=32u && c<=126u && c!='"' && c!='\\')?(char)c:'_';
+            i++;
+        }
+        last_stack_overflow_task[i]=0;
+    } else {
+        last_stack_overflow_task[0]='u';last_stack_overflow_task[1]='n';
+        last_stack_overflow_task[2]='k';last_stack_overflow_task[3]='n';
+        last_stack_overflow_task[4]='o';last_stack_overflow_task[5]='w';
+        last_stack_overflow_task[6]='n';last_stack_overflow_task[7]=0;
+    }
     stack_overflow_count++; /* Notification context: no printf, mutex or allocation. */
 }
 OSStatus system_stats_register_stack_diagnostic(void)
@@ -28,6 +45,40 @@ OSStatus system_stats_register_stack_diagnostic(void)
                                        (void *)stack_overflow_notice,NULL);
 }
 uint32_t system_stats_stack_overflow_count(void) { return stack_overflow_count; }
+void system_stats_last_stack_overflow_task(char *out,size_t capacity)
+{
+    size_t i=0;
+    if (!out || !capacity) return;
+    while (i+1u<capacity && i<OPENM1_STACK_TASK_NAME_MAX-1u && last_stack_overflow_task[i]) {
+        out[i]=(char)last_stack_overflow_task[i];i++;
+    }
+    out[i]=0;
+}
+uint32_t system_stats_stack_fault_quiet_remaining_ms(void)
+{
+    uint32_t count=stack_overflow_count,now=mico_rtos_get_time(),elapsed,remaining;
+    if (stats_ready) mico_rtos_lock_mutex(&stats_mutex);
+    if (count!=last_seen_stack_overflow_count) {
+        last_seen_stack_overflow_count=count;
+        last_stack_fault_observed_ms=now;
+    }
+    elapsed=now-last_stack_fault_observed_ms;
+    remaining=count && elapsed<OPENM1_STACK_FAULT_QUIET_MS?
+        OPENM1_STACK_FAULT_QUIET_MS-elapsed:0u;
+    if (stats_ready) mico_rtos_unlock_mutex(&stats_mutex);
+    return remaining;
+}
+int system_stats_stack_fault_cpu_ready(void)
+{
+    int ready;
+    (void)system_stats_stack_fault_quiet_remaining_ms();
+    if (stats_ready) mico_rtos_lock_mutex(&stats_mutex);
+    ready=!last_seen_stack_overflow_count ||
+          (uint32_t)(mico_rtos_get_time()-last_stack_fault_observed_ms)>=
+              2u*OPENM1_STACK_FAULT_QUIET_MS;
+    if (stats_ready) mico_rtos_unlock_mutex(&stats_mutex);
+    return ready;
+}
 int system_stats_free_heap(void)
 {
     micoMemInfo_t *memory=MicoGetMemoryInfo();
@@ -131,11 +182,16 @@ void system_stats_maybe_start_cpu(void)
 {
     OSStatus err;
     if (!stats_ready || cpu_thread_started || recovery_ota_busy() ||
+        (cpu_retry_not_before_ms &&
+         (int32_t)(mico_rtos_get_time()-cpu_retry_not_before_ms)<0) ||
         !system_stats_begin_optional_thread(SYSTEM_STATS_CPU_STACK)) return;
     err=mico_rtos_create_thread(&cpu_thread,SYSTEM_STATS_CPU_PRIORITY,
                                "openm1_cpu_sample",cpu_sampler,SYSTEM_STATS_CPU_STACK,0);
     if (err==kNoErr) cpu_thread_started=1;
-    else printf("STATS: CPU sampler unavailable: %d\r\n",err);
+    else {
+        cpu_retry_not_before_ms=mico_rtos_get_time()+30000u;
+        printf("STATS: CPU sampler unavailable: %d\r\n",err);
+    }
     system_stats_end_thread_creation();
 }
 
@@ -158,12 +214,15 @@ void system_stats_json(char *out,size_t capacity)
     char cpu_value[16];
     int ready=0,total=0,allocated=0,free_bytes=0,chunks=0;
     int boot_min,runtime_min,safe,stable;
-    char phase[16];
+    char phase[16],stack_task[OPENM1_STACK_TASK_NAME_MAX];
+    uint32_t stack_quiet_remaining;
     size_t i,used=0;
     int n,count=0;
     if (!out || !capacity) return;
     openm1_log_status(&log_status);
     system_stats_note_heap(0);
+    stack_quiet_remaining=system_stats_stack_fault_quiet_remaining_ms();
+    system_stats_last_stack_overflow_task(stack_task,sizeof(stack_task));
     if (stats_ready) {
         mico_rtos_lock_mutex(&stats_mutex);
         usage=cpu_usage_percent; ready=cpu_sample_ready;
@@ -175,7 +234,7 @@ void system_stats_json(char *out,size_t capacity)
              safe=low_memory_safe_mode; snprintf(phase,sizeof(phase),"%s",boot_phase); }
     stable=!safe && mico_rtos_get_time()>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS &&
            wifi_manager_control_running() &&
-           !stack_overflow_count && system_stats_free_heap()>=(int)OPENM1_MIN_HEAP_RESERVE;
+           !stack_quiet_remaining && system_stats_free_heap()>=(int)OPENM1_MIN_HEAP_RESERVE;
     if (stable) snprintf(phase,sizeof(phase),"stable");
     if (memory) {
         total=memory->total_memory>0?memory->total_memory:0;
@@ -194,11 +253,13 @@ void system_stats_json(char *out,size_t capacity)
        "\"free_chunks\":%d,\"used_percent\":%u,\"boot_min_free_bytes\":%d,"
        "\"runtime_min_free_bytes\":%d},\"boot_phase\":\"%s\",\"boot_stable\":%s,"
        "\"low_memory_safe_mode\":%s,\"stack_overflow_count\":%lu,"
-       "\"last_stack_overflow_task\":\"unknown\","
+       "\"last_stack_overflow_task\":\"%s\",\"stack_overflow_recent\":%s,"
+       "\"stack_fault_quiet_ms\":%u,\"stack_fault_quiet_remaining_ms\":%lu,"
        "\"flash\":{\"filesystem\":false,\"type\":\"raw_partitions\",\"partitions\":[",
        cpu_value,ready?"true":"false",total,allocated,free_bytes,chunks,used_percent,
        boot_min,runtime_min,phase,stable?"true":"false",safe?"true":"false",
-       (unsigned long)stack_overflow_count);
+       (unsigned long)stack_overflow_count,stack_task,stack_quiet_remaining?"true":"false",
+       (unsigned)OPENM1_STACK_FAULT_QUIET_MS,(unsigned long)stack_quiet_remaining);
     if (n<0 || (size_t)n>=capacity) goto overflow;
     used=(size_t)n;
     for (i=0;i<sizeof(partitions)/sizeof(partitions[0]);i++) {

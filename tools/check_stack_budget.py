@@ -27,7 +27,7 @@ for line in subprocess.check_output([a.nm,'-S',str(a.elf)],text=True).splitlines
 assert set(log_sizes)==log_symbols, f'missing logger BSS symbols: {log_symbols-set(log_sizes)}'
 log_bss=sum(log_sizes.values())
 assert log_bss<=2560, f'OpenM1 logger BSS exceeds 2560 bytes: {log_bss}'
-critical=6144+2048+4096+5120+2048 # HTTP, display, UART, Wi-Fi, housekeeping
+critical=6144+2048+4096+5120+3072 # HTTP, display, UART, Wi-Fi, housekeeping
 ota=5120
 optional=3072+1024+6144 # health, CPU, MQTT
 frames={}

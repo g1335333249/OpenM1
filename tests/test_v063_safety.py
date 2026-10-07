@@ -17,8 +17,8 @@ for name in ('after HTTP','after display','after UART','before Wi-Fi control','a
     assert f'boot_heap_log("{name}")' in main
 assert 'control worker unavailable; entering Recovery safe mode' in main
 assert 'system_stats_low_memory_safe_mode()' in main
-assert 'mico_rtos_get_time()>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS' in main
-assert main.index('mqtt_manager_maybe_start(0)') > main.index('mico_rtos_get_time()>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS')
+assert 'now>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS' in main
+assert main.index('mqtt_manager_maybe_start(0)') > main.index('now>=WIFI_BOOT_AUTO_CONNECT_GRACE_MS')
 assert 'system_stats_maybe_start_cpu()' in main
 assert 'OPENM1_MIN_HEAP_RESERVE 8192u' in Path('openm1/system_stats.h').read_text()
 assert 'system_stats_register_stack_diagnostic()' in main

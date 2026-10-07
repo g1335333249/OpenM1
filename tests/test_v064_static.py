@@ -32,7 +32,7 @@ for event in ('station_up','station_down','ap_up','ap_down'):
     assert f'"{event}"' in wifi
 assert 'last_wifi_event_code' in wifi
 assert 'network_health_available()' in wifi and 'display_station_fallback(1)' in wifi
-assert '#define OPENM1_HOUSEKEEPING_STACK 2048u' in main
+assert '#define OPENM1_HOUSEKEEPING_STACK 3072u' in main
 assert 'static void housekeeping_worker(' in main
 assert 'network_health_init()' in main.split('static void housekeeping_worker(',1)[1].split('int main(void)',1)[0]
 assert 'StartNetwork(' not in main.split('static void housekeeping_worker(',1)[1].split('int main(void)',1)[0]

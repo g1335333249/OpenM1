@@ -26,8 +26,7 @@ static const char *state_name(network_health_state_t state)
 
 static void apply_state(network_health_state_t state)
 {
-    m1_net_display_state_t target=state==NETWORK_ONLINE?M1_NET_DISPLAY_ONLINE:
-        state==NETWORK_NO_INTERNET?M1_NET_DISPLAY_NO_INTERNET:M1_NET_DISPLAY_DISCONNECTED;
+    m1_net_display_state_t target=network_health_display_target(state);
     m1_display_set_network_state(target);
     if (state==NETWORK_NO_INTERNET) openm1_log_warn("NETWORK","NO_INTERNET after consecutive probe failures");
     else if (state==NETWORK_ONLINE) openm1_log_info("NETWORK","ONLINE");
@@ -108,7 +107,8 @@ OSStatus network_health_init(void)
 {
     OSStatus err=mico_rtos_init_mutex(&health_mutex);
     if (err!=kNoErr) return err;
-    health.state=NETWORK_NO_WIFI;
+    health.state=wifi_manager_station_ready()?NETWORK_CHECKING:NETWORK_NO_WIFI;
+    if (health.state==NETWORK_CHECKING) m1_display_set_network_state(M1_NET_DISPLAY_ONLINE);
     health_ready=1;
     err=mico_rtos_create_thread(&health_thread,MICO_APPLICATION_PRIORITY,"openm1_net_health",
                                 health_worker,NETWORK_HEALTH_WORKER_STACK,0);
@@ -141,7 +141,10 @@ void network_health_status_json(char *out,size_t capacity)
     char ip[16];
     wifi_manager_station_ip(ip);
     if (health_ready) {mico_rtos_lock_mutex(&health_mutex);snapshot=health;mico_rtos_unlock_mutex(&health_mutex);}
-    else memset(&snapshot,0,sizeof(snapshot));
+    else {
+        memset(&snapshot,0,sizeof(snapshot));
+        snapshot.state=wifi_manager_station_ready()?NETWORK_CHECKING:NETWORK_NO_WIFI;
+    }
     snprintf(out,capacity,
              "{\"wifi_link\":%s,\"has_ip\":%s,\"internet\":%s,\"state\":\"%s\","
              "\"probe_failures\":%u,\"last_probe_ms\":%lu,\"display_target\":\"%s\","
@@ -151,6 +154,6 @@ void network_health_status_json(char *out,size_t capacity)
              link?"true":"false",ip[0]?"true":"false",
              snapshot.state==NETWORK_ONLINE?"true":"false",state_name(snapshot.state),
              (unsigned)snapshot.consecutive_failures,(unsigned long)snapshot.last_probe_ms,
-             snapshot.state==NETWORK_ONLINE?"wifi_solid":snapshot.state==NETWORK_NO_INTERNET?"wifi_solid":"wifi_blink",
+             network_health_display_target(snapshot.state)==M1_NET_DISPLAY_DISCONNECTED?"wifi_blink":"wifi_solid",
              snapshot.state==NETWORK_NO_INTERNET?"true":"false");
 }

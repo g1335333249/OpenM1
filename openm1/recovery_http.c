@@ -165,7 +165,7 @@ static int read_small_body(int fd,const char *request,int start,size_t initial,
 static void send_log_download(int fd)
 {
     static const char header[]="HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
-        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.7-log.txt\"\r\n"
+        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.8-log.txt\"\r\n"
         "Connection: close\r\nCache-Control: no-store\r\n\r\n";
     openm1_log_status_t status;
     openm1_log_record_t record;
@@ -174,7 +174,7 @@ static void send_log_download(int fd)
     int n;
     openm1_log_status(&status);
     if (recovery_send_all(fd,header,sizeof(header)-1u)) return;
-    n=snprintf(line,sizeof(line),"OpenM1 v0.6.7\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
+    n=snprintf(line,sizeof(line),"OpenM1 v0.6.8\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
                recovery_hostname(),(unsigned long)mico_rtos_get_time());
     if (n>0 && n<(int)sizeof(line) && recovery_send_all(fd,line,(size_t)n)) return;
     if (!status.available) {
@@ -258,7 +258,7 @@ static void handle_client(int fd)
             network_health_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.7\",\"version\":\"0.6.7\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.8\",\"version\":\"0.6.8\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),recovery_hostname(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -347,7 +347,7 @@ static void handle_client(int fd)
     }
     if (!strcmp(path,"/api/mqtt/start") || !strcmp(path,"/api/mqtt/test")) {
         int result=mqtt_manager_start();
-        if (!result) recovery_send_json(fd,202,"{\"ok\":true,\"message\":\"MQTT 服务正在启动。\"}");
+        if (!result) recovery_send_json(fd,202,"{\"ok\":true,\"message\":\"MQTT 已启用，网络和资源就绪后自动连接。\"}");
         else if (result==-2) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"请先配置 MQTT 服务器。\"}");
         else if (result==-4) recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"内存不足，MQTT 已延迟启动；Recovery 与 OTA 保持可用。\"}");
         else recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"MQTT 服务暂不可用。\"}");

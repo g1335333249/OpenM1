@@ -21,7 +21,7 @@ symbols_valid = all(f'PASS {symbol}' in header for symbol in ('user_handler','mo
 sdk_valid = Path('mico-os').is_dir() and __import__('subprocess').check_output(['git','-C','mico-os','rev-parse','HEAD'], text=True).strip() == SDK_COMMIT
 kernel = require_sdk_kernel(a.sdk_kernel)
 valid = all(checks.values()) and header_valid and symbols_valid and sdk_valid and '5.4.1' in a.toolchain
-data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.7','board':'MK3080B','sdk_commit':SDK_COMMIT,
+data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.8','board':'MK3080B','sdk_commit':SDK_COMMIT,
         'kernel':'3080B002.023','kernel_version':'3080B002.023','sdk_kernel_version':'3080B002.023',
         'kernel_source':'mico-os/resources/moc_kernel/3080B/kernel.bin',
         'kernel_sha256':hashlib.sha256(kernel).hexdigest(),'interface_version':3,
@@ -146,7 +146,12 @@ data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.7','board':'MK3080B',
         'ap_restore_requires_debounce':True,
         'wifi_events_consumed_by_control_worker':True,
         'main_thread_released_after_boot':True,
-        'housekeeping_stack_bytes':2048,
+        'housekeeping_stack_bytes':3072,
+        'stack_fault_quiet_ms':30000,
+        'mqtt_historical_stack_fault_latch':False,
+        'mqtt_worker_start_diagnostics':True,
+        'web_log_copy':True,
+        'network_checking_display':'wifi_solid',
         'station_auto_connect_during_rescue_window':False,
         'physical_reflash_failsafe':True,
         'recovery_ap_real_state_probe':True,
