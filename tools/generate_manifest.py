@@ -21,7 +21,7 @@ symbols_valid = all(f'PASS {symbol}' in header for symbol in ('user_handler','mo
 sdk_valid = Path('mico-os').is_dir() and __import__('subprocess').check_output(['git','-C','mico-os','rev-parse','HEAD'], text=True).strip() == SDK_COMMIT
 kernel = require_sdk_kernel(a.sdk_kernel)
 valid = all(checks.values()) and header_valid and symbols_valid and sdk_valid and '5.4.1' in a.toolchain
-data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.6','board':'MK3080B','sdk_commit':SDK_COMMIT,
+data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.7','board':'MK3080B','sdk_commit':SDK_COMMIT,
         'kernel':'3080B002.023','kernel_version':'3080B002.023','sdk_kernel_version':'3080B002.023',
         'kernel_source':'mico-os/resources/moc_kernel/3080B/kernel.bin',
         'kernel_sha256':hashlib.sha256(kernel).hexdigest(),'interface_version':3,
@@ -74,6 +74,10 @@ data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.6','board':'MK3080B',
         'homeassistant_discovery_verified_on_hardware':False,
         'mqtt_config_storage':'MiCO parameter partition app user data',
         'mqtt_worker_stack':6144,
+        'mqtt_select_bounded_read':True,
+        'mqtt_socket_receive_timeout_ms':0,
+        'mqtt_inbound_remaining_limit_bytes':1024,
+        'mqtt_failure_stage_diagnostics':True,
         'sensor_uart_present':True,'sensor_uart_verified_on_hardware':True,
         'sensor_protocol_status':'partial','temperature_feature':True,
         'humidity_feature':True,'pm25_feature':True,'formaldehyde_feature':True,

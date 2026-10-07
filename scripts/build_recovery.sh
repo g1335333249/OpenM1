@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.6
+PREFIX=OpenM1-v0.6.7
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 TOOL=.micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/Linux64/bin
 [[ "$(git -C mico-os rev-parse HEAD)" == "$SDK_COMMIT" ]]
@@ -15,6 +15,11 @@ python3 tests/test_v063_safety.py
 python3 tests/test_v064_static.py
 python3 tests/test_v065_hostname_static.py
 python3 tests/test_v066_logs_static.py
+python3 tests/test_v067_mqtt_static.py
+cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_mqtt_bounded_read.c openm1/mqtt_bounded_read.c -o /tmp/openm1-mqtt-read-test
+/tmp/openm1-mqtt-read-test
+cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_mqtt_diagnostics.c openm1/mqtt_diagnostics.c -o /tmp/openm1-mqtt-diagnostics-test
+/tmp/openm1-mqtt-diagnostics-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_openm1_log.c openm1/openm1_log.c -o /tmp/openm1-log-test
 /tmp/openm1-log-test
 cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_http_activity.c openm1/http_activity.c -o /tmp/openm1-http-activity-test

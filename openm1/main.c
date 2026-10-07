@@ -83,11 +83,11 @@ int main(void)
 
     result=openm1_log_init();
     if (result!=kNoErr) printf("BOOT: RAM logger unavailable: %d\r\n",result);
-    openm1_log_info("BOOT","OpenM1 v0.6.6");
+    openm1_log_info("BOOT","OpenM1 v0.6.7");
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.6\r\n"
+           "Version: 0.6.7\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");

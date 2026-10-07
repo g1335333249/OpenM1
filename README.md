@@ -1,4 +1,4 @@
-# OpenM1 v0.6.6
+# OpenM1 v0.6.7
 
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
@@ -16,6 +16,8 @@ v0.6.5 新增固定 DHCP hostname：设备 MAC 最后 3 字节生成 `OpenM1-XXX
 
 v0.6.6 新增 24 条固定记录的 RAM 环形系统日志。OpenM1 自身的重要启动、网络、显示、MQTT、OTA 状态变化同时输出至调试串口和 RAM；覆盖最旧记录，不持续写入 Flash，断电或重启后自动丢失。系统页每 2 秒增量读取 `/api/logs?after=<sequence>`，支持暂停、WARN/ERROR 过滤、清空与流式下载文本。日志不记录 Wi-Fi/MQTT 密码、token 或 2 秒一次的传感器 UART 原始帧；业务原始帧仍在 `/api/uart/raw`。**Web 日志只从 OpenM1 logger 初始化后开始；OpenM1 `main()` 之前的 ROM/MOC 启动日志无法捕获，仍需调试串口。**
 
+v0.6.7 针对实机 MQTT 在 CONNACK 成功后约 520–530 ms 反复断线的现象，移除 MQTT socket 的 500 ms 收发超时，改用 `select()` 和读取回调传入的总 deadline 等待下行数据。没有下行数据返回 0，交由固定 SDK 的 `MQTTYield` 正常执行 30 秒 keepalive；真正 peer close、socket 错误和超过 1024 字节的 MQTT Remaining Length 才返回负错误。状态接口新增失败阶段、返回码、连接/断线次数、发布失败、读取超时和 peer close 计数；RAM 日志只记录连接与真实故障，不记录每次正常 idle。**该修复仍待真实 Broker 长时间验证。**
+
 `main()` 创建 2048 字节 housekeeping 线程后返回，由固定 MOC `pre_main()` 删除原 4096 字节 app_thread，永久线程栈净减少约 2048 字节。housekeeping 只负责低频心跳、内存采样和可选服务懒启动，不调用 WLAN HAL。
 
 启动期只创建 Recovery HTTP、显示、UART 与唯一 Wi-Fi control 线程。Network Health 延迟到 Wi-Fi control 正常运行且 Station 就绪后启动；CPU sampler 至少等待 60 秒，MQTT 仅在启用且 Station 就绪或用户手动启动时创建。关键服务启动后堆不足 8192 字节，或 Wi-Fi control 不可用时进入 Recovery 安全模式，不启动这些可选 worker，也不自动重启。OTA worker 创建前要求空闲堆大于 5120 字节栈加 4096 字节安全余量；不足时 HTTP 503。`/api/system/stats` 报告启动期/运行期最低空闲堆、阶段、安全模式与栈溢出通知计数。Wi-Fi 故障通知只计数，由唯一控制线程处理 WLAN HAL。GCC `-fstack-usage` 和 ELF 堆区域预算是辅助静态检查，不能替代实机栈/堆观测。
@@ -26,7 +28,7 @@ v0.6.6 新增 24 条固定记录的 RAM 环形系统日志。OpenM1 自身的重
 
 访问 [http://192.168.4.1](http://192.168.4.1)。页面为单份内嵌 UTF-8 中文 HTML/CSS/JavaScript，无外部 CDN。七个 Tab 依次为首页、网络、MQTT、Home Assistant、固件升级、诊断、系统；URL hash 可直接打开指定 Tab，例如 `/#diagnostics`。页面只轮询当前 Tab 需要的状态，OTA 开始后则跨 Tab 持续轮询。OTA 重启时每 2 秒探测 `/api/health`，重新上线后刷新版本信息。
 
-RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.6-log.txt`；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
+RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.7-log.txt`；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
 
 | 路由 | 功能 |
 | --- | --- |
@@ -100,7 +102,7 @@ Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置
 
 完整 MOC OTA 由 Kernel、填充到 `0x75000`、8 字节 APP 头、APP payload、末尾 16 字节 raw MD5 组成。上传或 URL 下载时使用 2048 字节静态缓冲流式写入 `MICO_PARTITION_OTA_TEMP`，然后从 Flash 回读长度、两份 APP CRC、payload CRC 和整个 OTA（不含尾部 MD5）的 MD5；另外计算 boot table 所需 CRC16。验证成功才调用 `mico_ota_switch_to_new_fw(total_size - 16, boot_crc16)`，发送 HTTP 成功响应，等待两秒后 `MicoSystemReboot()`。任一校验失败不写升级标志、不重启。最大 OTA 文件限制为分区实际长度与 `0xB5000` 两者较小值。
 
-`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.6 的长期 Station 稳定性已通过实机验证。**
+`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.7 的长期 Station 稳定性已通过实机验证。**
 
 ## 构建与验证
 
@@ -118,9 +120,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.6.6@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.6.7@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.6.6.bin
+  --app dist/OpenM1-v0.6.7.bin
 ```
 
-GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.6`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.6 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
+GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.7`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.7 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。

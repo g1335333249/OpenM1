@@ -9,6 +9,8 @@
 #include "wifi_manager.h"
 #include "system_stats.h"
 #include "MQTTClient.h"
+#include "mqtt_bounded_read.h"
+#include "mqtt_diagnostics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +18,12 @@
 typedef struct {
     char state[20];
     char error[80];
+    char failure_stage[24];
     uint32_t last_connect_ms,last_publish_ms,last_discovery_ms,publish_count;
+    uint32_t connect_count,disconnect_count,mqtt_connect_fail_count,publish_fail_count;
+    uint32_t yield_fail_count,read_timeout_count,peer_close_count;
+    uint32_t last_disconnect_ms,last_connected_duration_ms,connected_since_ms;
+    int last_error_code,last_socket_read_result,last_socket_error,last_socket_write_result;
     int connected,ha_active;
 } mqtt_status_t;
 static mqtt_status_t status={{0}};
@@ -26,20 +33,97 @@ static int manager_ready;
 static int worker_created,worker_creation_pending;
 /* MQTTClient.c reallocates before receiving a body. Reject oversized broker
  * remaining-length fields while they are decoded, before that allocation. */
-static unsigned rx_phase,rx_remaining,rx_multiplier;
-static int bounded_mqtt_read(Network *network,unsigned char *buffer,int length,int timeout_ms)
+static openm1_mqtt_read_state_t mqtt_read_state;
+static uint32_t mqtt_now_ms(void *context)
 {
-    int got=MICO_read(network,buffer,length,timeout_ms);
-    if (got!=length || got<=0) return got;
-    if (rx_phase==0 && length==1) {
-        rx_phase=1;rx_remaining=0;rx_multiplier=1;
-    } else if (rx_phase==1 && length==1) {
-        rx_remaining+=(buffer[0]&127u)*rx_multiplier;
-        if (rx_remaining>1024u) return -1;
-        if (buffer[0]&128u) rx_multiplier*=128u;
-        else rx_phase=rx_remaining?2u:0u;
-    } else if (rx_phase==2) rx_phase=0;
-    return got;
+    (void)context;
+    return mico_rtos_get_time();
+}
+static int mqtt_wait_readable(void *context,int socket,uint32_t timeout_ms)
+{
+    fd_set readfds;
+    struct timeval timeout;
+    (void)context;
+    FD_ZERO(&readfds);FD_SET(socket,&readfds);
+    timeout.tv_sec=timeout_ms/1000u;
+    timeout.tv_usec=(timeout_ms%1000u)*1000u;
+    return select(socket+1,&readfds,NULL,NULL,&timeout);
+}
+static int mqtt_recv_bytes(void *context,int socket,unsigned char *buffer,int length)
+{
+    (void)context;
+    return recv(socket,buffer,length,0);
+}
+static int mqtt_socket_error(void *context,int socket)
+{
+    int error=0;
+    socklen_t size=sizeof(error);
+    (void)context;
+    return getsockopt(socket,SOL_SOCKET,SO_ERROR,&error,&size)==0?error:-1;
+}
+static void mqtt_pause_ms(void *context,uint32_t milliseconds)
+{
+    (void)context;
+    mico_thread_msleep(milliseconds);
+}
+static const openm1_mqtt_read_ops_t mqtt_read_ops={
+    mqtt_now_ms,mqtt_wait_readable,mqtt_recv_bytes,mqtt_socket_error,mqtt_pause_ms
+};
+static void record_failure(mqtt_failure_stage_t stage,int code);
+static int openm1_mqtt_read(Network *network,unsigned char *buffer,int length,int timeout_ms)
+{
+    uint32_t before_timeout=mqtt_read_state.read_timeout_count;
+    uint32_t before_close=mqtt_read_state.peer_close_count;
+    int result=openm1_mqtt_read_bounded(&mqtt_read_state,&mqtt_read_ops,NULL,
+                                       network->my_socket,buffer,length,timeout_ms);
+    mico_rtos_lock_mutex(&status_mutex);
+    status.read_timeout_count+=mqtt_read_state.read_timeout_count-before_timeout;
+    status.peer_close_count+=mqtt_read_state.peer_close_count-before_close;
+    status.last_socket_read_result=result;
+    if (result<0) status.last_socket_error=mqtt_read_state.last_socket_error;
+    mico_rtos_unlock_mutex(&status_mutex);
+    return result;
+}
+static int openm1_mqtt_write(Network *network,unsigned char *buffer,int length,int timeout_ms)
+{
+    int result=MICO_write(network,buffer,length,timeout_ms);
+    int socket_error=result<0?mqtt_socket_error(NULL,network->my_socket):0;
+    mico_rtos_lock_mutex(&status_mutex);
+    status.last_socket_write_result=result;
+    if (result<0) status.last_socket_error=socket_error;
+    mico_rtos_unlock_mutex(&status_mutex);
+    return result;
+}
+static void record_failure(mqtt_failure_stage_t stage,int code)
+{
+    mico_rtos_lock_mutex(&status_mutex);
+    snprintf(status.failure_stage,sizeof(status.failure_stage),"%s",mqtt_failure_stage_name(stage));
+    status.last_error_code=code;
+    if (stage==MQTT_STAGE_MQTT_CONNECT) status.mqtt_connect_fail_count++;
+    if (mqtt_failure_is_publish(stage)) status.publish_fail_count++;
+    if (mqtt_failure_is_yield(stage)) status.yield_fail_count++;
+    mico_rtos_unlock_mutex(&status_mutex);
+}
+static void record_connected(void)
+{
+    uint32_t now=mico_rtos_get_time();
+    mico_rtos_lock_mutex(&status_mutex);
+    status.connect_count++;
+    status.last_connect_ms=now;
+    status.connected_since_ms=now;
+    strcpy(status.failure_stage,"none");
+    status.last_error_code=0;
+    mico_rtos_unlock_mutex(&status_mutex);
+}
+static void record_disconnect(void)
+{
+    uint32_t now=mico_rtos_get_time();
+    mico_rtos_lock_mutex(&status_mutex);
+    status.disconnect_count++;
+    status.last_disconnect_ms=now;
+    status.last_connected_duration_ms=now-status.connected_since_ms;
+    status.connected_since_ms=0;
+    mico_rtos_unlock_mutex(&status_mutex);
 }
 
 static void set_state(const char *state,const char *error)
@@ -175,29 +259,33 @@ int mqtt_manager_set_discovery(int enabled)
     config.ha_enabled=enabled?1:0;
     return config_store_save(&config)==kNoErr?0:-3;
 }
-static int network_open(Network *network,const openm1_config_t *config)
+static int network_open(Network *network,const openm1_config_t *config,mqtt_failure_stage_t *failure_stage)
 {
     struct hostent *host;
     struct sockaddr_in address;
-    int timeout=500;
     memset(network,0,sizeof(*network));
     network->my_socket=-1;
-    rx_phase=0;rx_remaining=0;rx_multiplier=1;
+    openm1_mqtt_read_reset(&mqtt_read_state);
+    mico_rtos_lock_mutex(&status_mutex);
+    status.last_socket_read_result=0;
+    status.last_socket_write_result=0;
+    mico_rtos_unlock_mutex(&status_mutex);
     host=gethostbyname(config->host);
-    if (!host || !host->h_addr_list || !host->h_addr_list[0]) return -1;
+    if (!host || !host->h_addr_list || !host->h_addr_list[0]) {
+        *failure_stage=MQTT_STAGE_DNS;return -1;
+    }
     memset(&address,0,sizeof(address));
     address.sin_family=AF_INET;
     address.sin_port=htons(config->port);
     memcpy(&address.sin_addr,host->h_addr_list[0],sizeof(address.sin_addr));
     network->my_socket=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
-    if (network->my_socket<0) return -1;
-    setsockopt(network->my_socket,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
-    setsockopt(network->my_socket,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout));
+    if (network->my_socket<0) { *failure_stage=MQTT_STAGE_TCP_SOCKET;return -1; }
     if (connect(network->my_socket,(struct sockaddr *)&address,sizeof(address))!=0) {
+        *failure_stage=MQTT_STAGE_TCP_CONNECT;
         close(network->my_socket); network->my_socket=-1;return -1;
     }
-    network->mqttread=bounded_mqtt_read;
-    network->mqttwrite=MICO_write;
+    network->mqttread=openm1_mqtt_read;
+    network->mqttwrite=openm1_mqtt_write;
     network->disconnect=MICO_disconnect;
     return 0;
 }
@@ -214,6 +302,7 @@ static int publish_state(Client *client,const openm1_config_t *config)
     m1_sensor_snapshot_t sensor;
     char t[24],h[24],p[24],f[24],topic[150],payload[280];
     uint32_t now=mico_rtos_get_time();
+    int rc;
     m1_sensor_get_snapshot(&sensor);
     if (sensor.last_update_ms && now-sensor.last_update_ms<30000 && sensor.temperature_valid) snprintf(t,sizeof(t),"%.1f",(double)sensor.temperature); else strcpy(t,"null");
     if (sensor.last_update_ms && now-sensor.last_update_ms<30000 && sensor.humidity_valid) snprintf(h,sizeof(h),"%.1f",(double)sensor.humidity); else strcpy(h,"null");
@@ -222,13 +311,14 @@ static int publish_state(Client *client,const openm1_config_t *config)
     snprintf(topic,sizeof(topic),"%s/state",config->base_topic);
     snprintf(payload,sizeof(payload),"{\"temperature\":%s,\"humidity\":%s,\"PM25\":%s,\"formaldehyde\":%s,\"uptime\":%lu,\"rssi\":%d}",
              t,h,p,f,(unsigned long)(now/1000),wifi_manager_station_rssi());
-    if (publish(client,topic,payload,1)==MQTT_SUCCESS) {
+    rc=publish(client,topic,payload,1);
+    if (rc==MQTT_SUCCESS) {
         mico_rtos_lock_mutex(&status_mutex);
         status.last_publish_ms=now;status.publish_count++;
         mico_rtos_unlock_mutex(&status_mutex);
         return 0;
     }
-    return -1;
+    return rc;
 }
 static int connection_changed(const openm1_config_t *a,const openm1_config_t *b)
 {
@@ -245,17 +335,29 @@ static void mqtt_worker(mico_thread_arg_t arg)
     char availability[160];
     unsigned backoff=5;
     uint32_t last_publish=0;
-    int client_ready,connected;
+    int client_ready,connected,rc,write_result;
+    mqtt_failure_stage_t open_stage=MQTT_STAGE_NONE;
     (void)arg;
+    openm1_log_info("MQTT","worker started");
     for (;;) {
         config_store_get(&config);
         if (recovery_ota_busy()) {set_state("disabled","");mico_thread_msleep(500);continue;}
         if (!config.mqtt_enabled || !config.host[0]) {set_state("disabled","");mico_thread_msleep(500);continue;}
         if (!wifi_manager_station_ready()) {set_state("waiting_network","");mico_thread_msleep(1000);continue;}
         set_state("connecting","");
-        if (network_open(&network,&config)) goto retry;
+        open_stage=MQTT_STAGE_NONE;
+        if (network_open(&network,&config,&open_stage)) {
+            record_failure(open_stage,-1);
+            openm1_log_error("MQTT","%s failed",mqtt_failure_stage_name(open_stage));
+            goto retry;
+        }
         memset(&client,0,sizeof(client));client_ready=0;connected=0;
-        if (MQTTClientInit(&client,&network,3000)!=MQTT_SUCCESS) goto close_network;
+        rc=MQTTClientInit(&client,&network,3000);
+        if (rc!=MQTT_SUCCESS) {
+            record_failure(MQTT_STAGE_MQTT_CONNECT,rc);
+            openm1_log_error("MQTT","client init failed rc=%d",rc);
+            goto close_network;
+        }
         client_ready=1;
         memset(&options,0,sizeof(options));
         options.MQTTVersion=4;options.keepAliveInterval=30;options.cleansession=1;
@@ -265,34 +367,75 @@ static void mqtt_worker(mico_thread_arg_t arg)
         snprintf(availability,sizeof(availability),"%s/availability",config.base_topic);
         options.willFlag=1;options.will.topicName.cstring=availability;
         options.will.message.cstring="offline";options.will.retained=1;options.will.qos=QOS0;
-        if (MQTTConnect(&client,&options)!=MQTT_SUCCESS) goto close_network;
+        rc=MQTTConnect(&client,&options);
+        if (rc!=MQTT_SUCCESS) {
+            record_failure(MQTT_STAGE_MQTT_CONNECT,rc);
+            openm1_log_error("MQTT","CONNECT failed rc=%d",rc);
+            goto close_network;
+        }
+        openm1_log_info("MQTT","CONNACK accepted");
         connected=1;backoff=5;
+        record_connected();
         set_state("connected","");
-        mico_rtos_lock_mutex(&status_mutex);status.last_connect_ms=mico_rtos_get_time();mico_rtos_unlock_mutex(&status_mutex);
-        if (publish(&client,availability,"online",1)!=MQTT_SUCCESS) goto close_network;
+        rc=publish(&client,availability,"online",1);
+        if (rc!=MQTT_SUCCESS) {
+            record_failure(MQTT_STAGE_AVAILABILITY_PUBLISH,rc);
+            openm1_log_error("MQTT","availability publish failed rc=%d",rc);
+            goto close_network;
+        }
         last_publish=0;
         for (;;) {
             int ha_active;
             config_store_get(&current);
-            if (!current.mqtt_enabled || !wifi_manager_station_ready() || connection_changed(&config,&current)) break;
+            if (!current.mqtt_enabled || connection_changed(&config,&current)) {
+                record_failure(MQTT_STAGE_CONFIG_CHANGED,0);break;
+            }
+            if (!wifi_manager_station_ready()) {record_failure(MQTT_STAGE_WIFI_LOST,0);break;}
             if (recovery_ota_busy()) {mico_thread_msleep(500);continue;}
             mico_rtos_lock_mutex(&status_mutex);ha_active=status.ha_active;mico_rtos_unlock_mutex(&status_mutex);
             if (current.ha_enabled != ha_active) {
-                if (homeassistant_publish(&client,&current,!current.ha_enabled)) break;
+                rc=homeassistant_publish(&client,&current,!current.ha_enabled);
+                if (rc) {
+                    record_failure(MQTT_STAGE_HA_DISCOVERY,rc);
+                    openm1_log_error("MQTT","HA discovery publish failed rc=%d",rc);
+                    break;
+                }
                 mico_rtos_lock_mutex(&status_mutex);
                 status.ha_active=current.ha_enabled;
                 status.last_discovery_ms=mico_rtos_get_time();
                 mico_rtos_unlock_mutex(&status_mutex);
             }
             if (!last_publish || mico_rtos_get_time()-last_publish>=current.publish_interval*1000u) {
-                if (publish_state(&client,&current)) break;
+                rc=publish_state(&client,&current);
+                if (rc) {
+                    record_failure(MQTT_STAGE_STATE_PUBLISH,rc);
+                    openm1_log_error("MQTT","state publish failed rc=%d",rc);
+                    break;
+                }
                 last_publish=mico_rtos_get_time();
             }
-            if (MQTTYield(&client,200)!=MQTT_SUCCESS) break;
+            mqtt_read_state.last_result=0;
+            mico_rtos_lock_mutex(&status_mutex);
+            status.last_socket_write_result=0;
+            mico_rtos_unlock_mutex(&status_mutex);
+            rc=MQTTYield(&client,200);
+            if (rc!=MQTT_SUCCESS) {
+                mqtt_failure_stage_t stage;
+                mico_rtos_lock_mutex(&status_mutex);
+                write_result=status.last_socket_write_result;
+                mico_rtos_unlock_mutex(&status_mutex);
+                stage=mqtt_yield_failure_stage(mqtt_read_state.last_result,write_result);
+                record_failure(stage,rc);
+                openm1_log_error("MQTT","MQTTYield failed rc=%d stage=%s",rc,mqtt_failure_stage_name(stage));
+                break;
+            }
         }
-        if (connected) publish(&client,availability,"offline",1);
-        if (connected) MQTTDisconnect(&client);
 close_network:
+        if (connected) {
+            record_disconnect();
+            publish(&client,availability,"offline",1);
+            MQTTDisconnect(&client);
+        }
         if (client_ready) MQTTClientDeinit(&client);
         MICO_disconnect(&network);
 retry:
@@ -310,6 +453,7 @@ OSStatus mqtt_manager_init(void)
     if (err!=kNoErr) return err;
     config_store_get(&config);
     strcpy(status.state,config.mqtt_enabled?"waiting_network":"disabled");
+    strcpy(status.failure_stage,"none");
     manager_ready=1;
     return kNoErr;
 }
@@ -370,11 +514,23 @@ void mqtt_manager_status_json(char *out,size_t capacity)
     json_escape(username,sizeof(username),config.username);
     snprintf(out,capacity,"{\"configured\":%s,\"enabled\":%s,\"state\":\"%s\",\"host\":\"%s\",\"port\":%u,"
         "\"username\":\"%s\",\"password_set\":%s,\"client_id\":\"%s\",\"base_topic\":\"%s\","
-        "\"publish_interval\":%u,\"last_connect_ms\":%lu,\"last_publish_ms\":%lu,\"publish_count\":%lu,\"error\":\"%s\"}",
+        "\"publish_interval\":%u,\"last_connect_ms\":%lu,\"last_publish_ms\":%lu,\"publish_count\":%lu,\"error\":\"%s\","
+        "\"failure_stage\":\"%s\",\"last_error_code\":%d,\"connect_count\":%lu,\"disconnect_count\":%lu,"
+        "\"mqtt_connect_fail_count\":%lu,\"publish_fail_count\":%lu,\"yield_fail_count\":%lu,"
+        "\"read_timeout_count\":%lu,\"peer_close_count\":%lu,\"last_disconnect_ms\":%lu,"
+        "\"last_connected_duration_ms\":%lu,\"last_socket_read_result\":%d,\"last_socket_error\":%d,"
+        "\"last_socket_write_result\":%d}",
         config.host[0]?"true":"false",config.mqtt_enabled?"true":"false",snapshot.state,
         config.host,config.port,username,config.password[0]?"true":"false",config.client_id,
         config.base_topic,config.publish_interval,(unsigned long)snapshot.last_connect_ms,
-        (unsigned long)snapshot.last_publish_ms,(unsigned long)snapshot.publish_count,snapshot.error);
+        (unsigned long)snapshot.last_publish_ms,(unsigned long)snapshot.publish_count,snapshot.error,
+        snapshot.failure_stage,snapshot.last_error_code,
+        (unsigned long)snapshot.connect_count,(unsigned long)snapshot.disconnect_count,
+        (unsigned long)snapshot.mqtt_connect_fail_count,(unsigned long)snapshot.publish_fail_count,
+        (unsigned long)snapshot.yield_fail_count,(unsigned long)snapshot.read_timeout_count,
+        (unsigned long)snapshot.peer_close_count,(unsigned long)snapshot.last_disconnect_ms,
+        (unsigned long)snapshot.last_connected_duration_ms,snapshot.last_socket_read_result,
+        snapshot.last_socket_error,snapshot.last_socket_write_result);
 }
 void homeassistant_status_json(char *out,size_t capacity)
 {

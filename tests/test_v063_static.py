@@ -5,7 +5,7 @@ main=Path('openm1/main.c').read_text()
 http=Path('openm1/recovery_http.c').read_text()
 page=Path('openm1/recovery_page.html').read_text()
 manifest=Path('tools/generate_manifest.py').read_text()
-assert '0.6.6' in main and '0.6.6' in http and '0.6.6' in manifest
+assert '0.6.7' in main and '0.6.7' in http and '0.6.7' in manifest
 assert 'wifi_control_worker(mico_thread_arg_t arg)' in wifi
 assert wifi.count('mico_rtos_create_thread(')==1
 for old in ('ap_policy_worker','wifi_station_supervisor_worker','wlan_control_mutex','station_supervisor_thread','ap_policy_thread','openm1_config_t config;\n    OSStatus err;\n    int eligible'):
