@@ -26,6 +26,7 @@ OSStatus mico_rtos_create_thread(mico_thread_t *thread,uint8_t priority,const ch
 mico_Context_t *mico_system_context_get(void);
 void *mico_system_context_get_user_data(mico_Context_t *context);
 OSStatus mico_system_context_update(mico_Context_t *context);
+void MicoSystemReboot(void);
 OSStatus mico_rtos_init_timer(mico_timer_t *timer,uint32_t milliseconds,timer_handler_t callback,void *arg);
 OSStatus mico_rtos_start_timer(mico_timer_t *timer);
 OSStatus mico_rtos_stop_timer(mico_timer_t *timer);

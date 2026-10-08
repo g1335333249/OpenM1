@@ -39,7 +39,8 @@ ota=5120
 optional=3072+1024+6144 # health, CPU, MQTT
 frames={}
 needed=('housekeeping_worker','wifi_control_worker','recovery_http_server_thread','m1_uart_worker',
-        'network_display_worker','health_worker','mqtt_worker')
+        'network_display_worker','health_worker','mqtt_worker','button_manager_tick',
+        'config_store_factory_reset')
 for path in a.su_dir.glob('*.su'):
     for line in path.read_text().splitlines():
         parts=line.split('\t')

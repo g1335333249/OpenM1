@@ -36,7 +36,7 @@ int main(void)
         char expected[160];
         snprintf(expected,sizeof(expected),"homeassistant/sensor/openm1_ABCDEF/%s/config",sensors[i]);
         assert(strcmp(topics[i],expected)==0);
-        assert(lengths[i]>0 && strstr(payloads[i],"OpenM1 v0.6.12"));
+        assert(lengths[i]>0 && strstr(payloads[i],"OpenM1 v0.6.13"));
     }
     assert(strcmp(topics[4],"homeassistant/number/openm1_ABCDEF/brightness/config")==0);
     for (i=0;i<8;i++) {
@@ -46,7 +46,7 @@ int main(void)
     }
     assert(strstr(payloads[4],"\"mode\":\"slider\""));
     assert(strstr(payloads[4],"openm1/ABCDEF/availability"));
-    assert(strstr(payloads[4],"OpenM1 v0.6.12"));
+    assert(strstr(payloads[4],"OpenM1 v0.6.13"));
     publish_count=0;
     assert(homeassistant_publish(&client,&config,1)==0 && publish_count==5);
     for (i=0;i<5;i++) assert(lengths[i]==0 && payloads[i][0]==0);

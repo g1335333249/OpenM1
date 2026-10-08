@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.12
+PREFIX=OpenM1-v0.6.13
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 if [[ "$(uname -s)" == Darwin ]]; then BUILD_HOST_OS=OSX; else BUILD_HOST_OS=Linux64; fi
 TOOL=".micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/$BUILD_HOST_OS/bin"
@@ -13,6 +13,8 @@ python3 tools/embed_page.py --check
 python3 tests/test_web_tabs.py
 python3 tests/test_v012_api_console.py
 node tests/test_api_console.js
+node tests/test_button_web.js
+python3 tests/test_v013_factory_reset_static.py
 python3 tests/test_v063_static.py
 python3 tests/test_v063_safety.py
 python3 tests/test_v064_static.py
@@ -44,6 +46,10 @@ cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_recovery_hos
 /tmp/openm1-hostname-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_sensor.c openm1/m1_sensor.c -o /tmp/openm1-sensor-test
 /tmp/openm1-sensor-test
+cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_button_manager.c openm1/button_manager.c -o /tmp/openm1-button-test
+/tmp/openm1-button-test
+cc -std=c99 -Wall -Wextra -Werror -DOPENM1_FACTORY_RESET_DRY_RUN=0 -DOPENM1_FACTORY_RESET_EXPLICIT_ENABLE=1 -Itests/stubs -Iopenm1 tests/test_button_manager.c openm1/button_manager.c -o /tmp/openm1-button-real-path-test
+/tmp/openm1-button-real-path-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_display.c openm1/m1_display_network.c openm1/openm1_log.c -o /tmp/openm1-display-test
 /tmp/openm1-display-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_display_network.c openm1/m1_display_network.c -o /tmp/openm1-display-network-test
@@ -98,6 +104,10 @@ for symbol in m1_uart_init m1_uart_worker m1_uart_send_init_command m1_uart_requ
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
+for symbol in button_manager_init button_manager_note_long_press button_manager_tick button_manager_status_json; do
+  if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
+  echo "[PASS] $symbol"
+done
 for symbol in wifi_manager_start_scan scan_complete wifi_manager_apply_boot_settings wifi_manager_save_settings wifi_control_worker wifi_ap_restore_backoff_ms system_stats_init system_stats_json openm1_log_init openm1_log_json openm1_log_clear openm1_http_explicit_recovery_activity mqtt_manager_init MQTTClientInit MQTTConnect MQTTPublish mqtt_manager_set_discovery homeassistant_publish ha_policy_can_enable; do
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
@@ -105,7 +115,7 @@ done
 grep -Fq 'mico_notify_WIFI_SCAN_ADV_COMPLETED' openm1/wifi_manager.c
 grep -Fq 'micoWlanStartScanAdv()' openm1/wifi_manager.c
 echo '[PASS] SDK advanced scan callback and API'
-for route in /api/logs /api/logs/download /api/logs/clear /api/ota/prepare /api/wifi/status /api/wifi/settings /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/system/stats /api/sensors /api/uart/status /api/uart/raw /api/uart/config /api/uart/init /api/uart/sensor-request /api/display/status /api/display/brightness /api/display/network-test /api/network/health /api/ota/status /api/ota/upload /api/ota/url /api/reboot /api/mqtt/status /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
+for route in /api/logs /api/logs/download /api/logs/clear /api/ota/prepare /api/wifi/status /api/wifi/settings /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/system/stats /api/sensors /api/uart/status /api/uart/raw /api/button/status /api/uart/config /api/uart/init /api/uart/sensor-request /api/display/status /api/display/brightness /api/display/network-test /api/network/health /api/ota/status /api/ota/upload /api/ota/url /api/reboot /api/mqtt/status /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
   if ! "$TOOL/arm-none-eabi-strings" "dist/$PREFIX.elf" | grep -F "$route" >/dev/null; then echo "[FAIL] missing route $route"; exit 1; fi
   echo "[PASS] $route"
 done

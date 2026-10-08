@@ -1,4 +1,5 @@
 #include "m1_sensor.h"
+#include "button_manager.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -91,6 +92,19 @@ void m1_sensor_parse(const uint8_t *bytes, size_t length)
                 mico_rtos_unlock_mutex(&sensor_mutex);
                 switch (frame[1]) {
                 case 0x01: accept_frame(frame); break;
+                case 0x04: {
+                    unsigned j;
+                    for (j=2;j<19 && frame[j]==0;j++) {}
+                    if (j==19) button_manager_note_long_press();
+                    else {
+                        mico_rtos_lock_mutex(&sensor_mutex);
+                        sensor.invalid_frames++;
+                        sensor.parser_error_count++;
+                        mico_rtos_unlock_mutex(&sensor_mutex);
+                        button_manager_note_invalid_long_frame();
+                    }
+                    break;
+                }
                 case 0x0c: accept_time_frame(frame); break;
                 case 0x0f:
                     mico_rtos_lock_mutex(&sensor_mutex);
@@ -98,6 +112,7 @@ void m1_sensor_parse(const uint8_t *bytes, size_t length)
                     sensor.type0f_last_value=frame[2];
                     sensor.type0f_last_rx_ms=mico_rtos_get_time();
                     mico_rtos_unlock_mutex(&sensor_mutex);
+                    button_manager_note_short_press();
                     if (brightness_callback) brightness_callback(frame[2]);
                     break;
                 case 0x18:

@@ -4,7 +4,9 @@
 #include <string.h>
 
 static openm1_log_record_t records[OPENM1_LOG_RECORD_COUNT];
-static char scratch[96];
+/* A record stores at most 63 message bytes; a larger formatter scratch only
+ * consumed scarce heap-region RAM without preserving more log text. */
+static char scratch[OPENM1_LOG_MESSAGE_MAX];
 static mico_mutex_t log_mutex;
 static uint32_t next_sequence=1,wrap_count,dropped_count;
 static unsigned head,count;

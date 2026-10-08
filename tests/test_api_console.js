@@ -27,7 +27,7 @@ const context = {$,document,navigator:{clipboard:{writeText:async text=>{copied=
 vm.createContext(context);
 vm.runInContext('const apiEndpoints=['+code+'\nglobalThis.apiTest={apiEndpoints,selectApi,executeApi,copyApiResponse,formatApiResponse,renderApiList};',context);
 const api=context.apiTest;
-assert.equal(api.apiEndpoints.length,35);
+assert.equal(api.apiEndpoints.length,36);
 assert.equal(calls.length,0,'catalog initialization must not fetch APIs');
 const endpoint=(method,path)=>api.apiEndpoints.find(e=>e.method===method&&e.path===path);
 async function main(){
@@ -51,11 +51,11 @@ async function main(){
   assert.equal(calls.at(-1)[1].body,'{"brightness":2}');
   api.selectApi(endpoint('POST','/api/reboot'));await api.executeApi();assert.equal(confirms,1);
   assert.equal(calls.at(-1)[1].body,undefined,'no-body POST must not send a body');
-  $('api-search').value='亮度';api.renderApiList();assert.match($('api-count').textContent,/2 \/ 35/);
+  $('api-search').value='亮度';api.renderApiList();assert.match($('api-count').textContent,/2 \/ 36/);
   $('api-search').value='';$('api-method-filter').value='POST';api.renderApiList();
-  assert.match($('api-count').textContent,/19 \/ 35/);
+  assert.match($('api-count').textContent,/19 \/ 36/);
   $('api-method-filter').value='all';$('api-category-filter').value='OTA';api.renderApiList();
-  assert.match($('api-count').textContent,/4 \/ 35/);
+  assert.match($('api-count').textContent,/4 \/ 36/);
   await api.copyApiResponse();assert.equal(copied,'{\n  "ok": true\n}');
   context.navigator.clipboard={writeText:async()=>{throw Error('unavailable')}};
   await api.copyApiResponse();assert(fallback);assert.equal(copied,'{\n  "ok": true\n}');

@@ -35,3 +35,4 @@ OSStatus config_store_init(void);
 void config_store_get(openm1_config_t *out);
 OSStatus config_store_save(const openm1_config_t *config);
 OSStatus config_store_save_brightness(uint8_t brightness, uint8_t last_nonzero);
+OSStatus config_store_factory_reset(void);

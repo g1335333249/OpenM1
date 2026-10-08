@@ -4,6 +4,10 @@
 #include <string.h>
 
 static uint32_t test_time=12345;
+static unsigned short_buttons,long_buttons,invalid_long_buttons;
+void button_manager_note_short_press(void) { short_buttons++; }
+void button_manager_note_long_press(void) { long_buttons++; }
+void button_manager_note_invalid_long_frame(void) { invalid_long_buttons++; }
 OSStatus mico_rtos_init_mutex(mico_mutex_t *mutex) { *mutex=1; return kNoErr; }
 OSStatus mico_rtos_lock_mutex(mico_mutex_t *mutex) { assert(*mutex); return kNoErr; }
 OSStatus mico_rtos_unlock_mutex(mico_mutex_t *mutex) { assert(*mutex); return kNoErr; }
@@ -25,6 +29,7 @@ int main(void)
     const uint8_t type0f_one[20]={'#',0x0f,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'!'};
     const uint8_t type18[20]={'#',0x18,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'!'};
     const uint8_t unknown[20]={'#',0x77,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'!'};
+    const uint8_t long_press[20]={'#',0x04,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,'!'};
     uint8_t damaged[20];
     assert(m1_sensor_init()==kNoErr);
     m1_sensor_json(json,sizeof(json));
@@ -62,15 +67,28 @@ int main(void)
     m1_sensor_get_snapshot(&s);
     assert(s.total_frames==10 && s.sensor_frames==2 && s.time_frames==4);
     assert(s.type0f_frames==2 && s.type18_frames==1 && s.unknown_frames==1);
+    assert(short_buttons==2 && long_buttons==0);
     assert(s.invalid_frames==1 && s.type0f_last_value==1 && s.type0f_last_rx_ms==13000);
     assert(strcmp(s.m1_datetime,"2026-10-05 07:03:40")==0);
+    m1_sensor_parse(long_press,sizeof(long_press));
+    assert(long_buttons==1 && invalid_long_buttons==0);
+    memcpy(damaged,long_press,sizeof(damaged)); damaged[8]=1;
+    m1_sensor_parse(damaged,sizeof(damaged));
+    assert(long_buttons==1 && invalid_long_buttons==1);
+    memcpy(damaged,long_press,sizeof(damaged)); damaged[19]=0;
+    m1_sensor_parse(damaged,sizeof(damaged));
+    memcpy(damaged,long_press,sizeof(damaged)); damaged[0]=0x22;
+    m1_sensor_parse(damaged,sizeof(damaged));
+    assert(long_buttons==1 && invalid_long_buttons==1);
+    m1_sensor_get_snapshot(&s);
+    assert(s.unknown_frames==1 && s.invalid_frames==3);
     {
         uint8_t stream[43] = {0x11,0x22,0x33};
         memcpy(stream+3,frame,20);
         memcpy(stream+23,frame,20);
         m1_sensor_parse(stream,sizeof(stream)); /* bad prefix and two sticky frames */
         m1_sensor_get_snapshot(&s);
-        assert(s.total_frames==12 && s.sensor_frames==4);
+        assert(s.total_frames==14 && s.sensor_frames==4);
     }
     puts("M1_SENSOR_PARSER_PASS");
     return 0;

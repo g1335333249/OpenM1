@@ -190,3 +190,22 @@ OSStatus config_store_save_brightness(uint8_t brightness, uint8_t last_nonzero)
     mico_rtos_unlock_mutex(&config_mutex);
     return err;
 }
+
+OSStatus config_store_factory_reset(void)
+{
+    openm1_config_t *saved;
+    OSStatus err;
+    /* Keep a 708-byte configuration off the 3072-byte housekeeping stack.
+     * config_cache is the last effective valid configuration and is retained
+     * until the context update has actually succeeded. */
+    if (!config_ready || recovery_ota_busy()) return kNotPreparedErr;
+    mico_rtos_lock_mutex(&config_mutex);
+    saved=(openm1_config_t *)mico_system_context_get_user_data(mico_system_context_get());
+    if (!saved) { mico_rtos_unlock_mutex(&config_mutex); return kNotPreparedErr; }
+    config_store_defaults(saved);
+    err=mico_system_context_update(mico_system_context_get());
+    if (err==kNoErr) config_cache=*saved;
+    else *saved=config_cache;
+    mico_rtos_unlock_mutex(&config_mutex);
+    return err;
+}

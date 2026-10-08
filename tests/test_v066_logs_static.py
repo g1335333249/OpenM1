@@ -6,7 +6,7 @@ wifi=Path('openm1/wifi_manager.c').read_text()
 page=Path('openm1/recovery_page.html').read_text()
 assert '#define OPENM1_LOG_RECORD_COUNT 24u' in Path('openm1/openm1_log.h').read_text()
 assert 'malloc(' not in log and 'MicoFlash' not in log and 'StartNetwork' not in log
-assert 'static char scratch[96]' in log and 'mico_rtos_lock_mutex(&log_mutex)' in log
+assert 'static char scratch[OPENM1_LOG_MESSAGE_MAX]' in log and 'mico_rtos_lock_mutex(&log_mutex)' in log
 assert 'OPENM1_LOG_PAGE_RECORDS 8u' in Path('openm1/openm1_log.h').read_text()
 assert 'openm1_http_explicit_recovery_activity(method,path)' in http
 activity=Path('openm1/http_activity.c').read_text()

@@ -11,6 +11,7 @@
 #include "system_stats.h"
 #include "openm1_log.h"
 #include "worker_retry_logic.h"
+#include "button_manager.h"
 
 /* Implemented by the pinned SDK's MiCO/net/mocIP/mico/mico_socket.c. */
 extern char *sethostname(char *name);
@@ -52,6 +53,7 @@ static void housekeeping_worker(mico_thread_arg_t arg)
         mico_thread_msleep(1000);
         now=mico_rtos_get_time();
         system_stats_note_heap(0);
+        button_manager_tick();
         fault_count=system_stats_stack_overflow_count();
         quiet_remaining=system_stats_stack_fault_quiet_remaining_ms();
         if (fault_count!=last_overflow_count) {
@@ -124,11 +126,11 @@ int main(void)
     result=openm1_log_init();
     if (result!=kNoErr) printf("BOOT: RAM logger unavailable: %d\r\n",result);
     openm1_log_info("BOOT","app_thread stack configured = %lu",(unsigned long)app_stack_size);
-    openm1_log_info("BOOT","OpenM1 v0.6.12");
+    openm1_log_info("BOOT","OpenM1 v0.6.13");
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.12\r\n"
+           "Version: 0.6.13\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -224,6 +226,8 @@ int main(void)
     result=config_store_init();
     boot_log_init_error("config",result);
     openm1_log_info("BOOT","config init result = %d",result);
+    result=button_manager_init();
+    boot_log_init_error("button manager",result);
     wifi_result=wifi_manager_init();
     boot_log_init_error("Wi-Fi manager",wifi_result);
     openm1_log_info("BOOT","Wi-Fi manager init result = %d",wifi_result);
