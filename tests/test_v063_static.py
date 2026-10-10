@@ -5,7 +5,7 @@ main=Path('openm1/main.c').read_text()
 http=Path('openm1/recovery_http.c').read_text()
 page=Path('openm1/recovery_page.html').read_text()
 manifest=Path('tools/generate_manifest.py').read_text()
-assert '0.6.13' in main and '0.6.13' in http and '0.6.13' in manifest
+assert '0.6.14' in main and '0.6.14' in http and '0.6.14' in manifest
 assert 'wifi_control_worker(mico_thread_arg_t arg)' in wifi
 assert wifi.count('mico_rtos_create_thread(')==1
 for old in ('ap_policy_worker','wifi_station_supervisor_worker','wlan_control_mutex','station_supervisor_thread','ap_policy_thread','openm1_config_t config;\n    OSStatus err;\n    int eligible'):
@@ -45,5 +45,5 @@ assert 'openm1_config_t' not in worker
 import re
 assert not re.search(r'\b(?:char|uint8_t|uint16_t|uint32_t)\s+\w+\[(?:[1-9]\d{3,})\]',worker)
 assert wifi.split('OSStatus wifi_manager_init(void)',1)[1].split('OSStatus wifi_manager_apply_boot_settings',1)[0].count('mico_rtos_create_thread')==0
-assert 'micoWlanStartScanAdv()' not in wifi.split('int wifi_manager_start_scan(void)',1)[1].split('const char *wifi_manager_scan_json',1)[0]
+assert 'micoWlanStartScanAdv()' not in wifi.split('int wifi_manager_start_scan(void)',1)[1].split('int wifi_manager_scan_snapshot',1)[0]
 print('V063_STATIC_PASS: single WLAN worker, 5s native retry, 60s fallback, boot ordering and cached HTTP')

@@ -32,9 +32,19 @@ static void apply_state(network_health_state_t state)
 {
     m1_net_display_state_t target=network_health_display_target(state);
     m1_display_set_network_state(target);
+    wifi_manager_history_note(WIFI_HISTORY_NETWORK_HEALTH);
     if (state==NETWORK_NO_INTERNET) openm1_log_warn("NETWORK","NO_INTERNET after consecutive probe failures");
     else if (state==NETWORK_ONLINE) openm1_log_info("NETWORK","ONLINE");
     else if (state==NETWORK_NO_WIFI) openm1_log_info("NETWORK","NO_WIFI");
+}
+network_health_state_t network_health_current_state(void)
+{
+    network_health_state_t result;
+    if (!health_ready) return wifi_manager_station_ready()?NETWORK_CHECKING:NETWORK_NO_WIFI;
+    mico_rtos_lock_mutex(&health_mutex);
+    result=health.state;
+    mico_rtos_unlock_mutex(&health_mutex);
+    return result;
 }
 
 /* Nonblocking TCP connect with a bounded select. No payload is sent. */

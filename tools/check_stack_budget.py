@@ -34,6 +34,12 @@ for line in subprocess.check_output([a.nm,'-S',str(a.elf)],text=True).splitlines
 assert set(log_sizes)==log_symbols, f'missing logger BSS symbols: {log_symbols-set(log_sizes)}'
 log_bss=sum(log_sizes.values())
 assert log_bss<=2560, f'OpenM1 logger BSS exceeds 2560 bytes: {log_bss}'
+history_sizes=[]
+for line in subprocess.check_output([a.nm,'-S',str(a.elf)],text=True).splitlines():
+    parts=line.split()
+    if len(parts)==4 and parts[3]=='wifi_history' and parts[2].lower()=='b':
+        history_sizes.append(int(parts[1],16))
+assert len(history_sizes)==1 and history_sizes[0]<=2048, 'Wi-Fi history BSS exceeds 2048 bytes'
 critical=6144+2048+4096+5120+3072 # HTTP, display, UART, Wi-Fi, housekeeping
 ota=5120
 optional=3072+1024+6144 # health, CPU, MQTT
@@ -55,6 +61,7 @@ boot_before_housekeeping=heap-(critical-3072+app_thread_stack)
 boot_overlap_reserve=reserve-app_thread_stack
 report=[f'APP_HEAP_REGION_BYTES={heap}',f'CRITICAL_THREAD_STACK_BUDGET={critical}',
         f'OPENM1_LOG_BSS_BYTES={log_bss}',
+        f'WIFI_HISTORY_BSS_BYTES={history_sizes[0]}',
         f'ESTIMATED_HEAP_REGION_BEFORE_LOG_BSS={heap+log_bss}',
         f'ESTIMATED_STABLE_RESERVE_BEFORE_LOG_BSS={reserve+log_bss}',
         f'STABLE_THEORETICAL_RESERVE_AFTER_LOG_BSS={reserve}',

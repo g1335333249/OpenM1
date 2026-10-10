@@ -10,6 +10,7 @@
 #include "openm1_log.h"
 #include "http_activity.h"
 #include "button_manager.h"
+#include "ipv6_diagnostic.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -166,7 +167,7 @@ static int read_small_body(int fd,const char *request,int start,size_t initial,
 static void send_log_download(int fd)
 {
     static const char header[]="HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
-        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.13-log.txt\"\r\n"
+        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.14-log.txt\"\r\n"
         "Connection: close\r\nCache-Control: no-store\r\n\r\n";
     openm1_log_status_t status;
     openm1_log_record_t record;
@@ -175,7 +176,7 @@ static void send_log_download(int fd)
     int n;
     openm1_log_status(&status);
     if (recovery_send_all(fd,header,sizeof(header)-1u)) return;
-    n=snprintf(line,sizeof(line),"OpenM1 v0.6.13\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
+    n=snprintf(line,sizeof(line),"OpenM1 v0.6.14\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
                recovery_hostname(),(unsigned long)mico_rtos_get_time());
     if (n>0 && n<(int)sizeof(line) && recovery_send_all(fd,line,(size_t)n)) return;
     if (!status.available) {
@@ -191,6 +192,50 @@ static void send_log_download(int fd)
                    record.module,record.message);
         if (n<=0 || n>=(int)sizeof(line) || recovery_send_all(fd,line,(size_t)n)) break;
     }
+}
+static int send_json_stream_header(int fd)
+{
+    static const char header[]="HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+        "Connection: close\r\nCache-Control: no-store\r\n\r\n";
+    return recovery_send_all(fd,header,sizeof(header)-1u);
+}
+static void send_wifi_scan(int fd)
+{
+    char state[12],line[192],prefix[96];
+    unsigned count,i,sent=0;
+    int n,supported=wifi_manager_scan_snapshot(state,&count);
+    if (send_json_stream_header(fd)) return;
+    n=snprintf(prefix,sizeof(prefix),"{\"supported\":%s,\"state\":\"%s\",\"networks\":[",
+               supported?"true":"false",state);
+    if (n<0 || n>=(int)sizeof(prefix) || recovery_send_all(fd,prefix,(size_t)n)) return;
+    for (i=0;i<count;i++) {
+        n=wifi_manager_scan_record_json(i,line,sizeof(line));
+        if (n<=0) continue;
+        if (sent++ && recovery_send_all(fd,",",1)) return;
+        if (recovery_send_all(fd,line,(size_t)n)) return;
+    }
+    recovery_send_all(fd,"]}",2);
+}
+static void send_wifi_history(int fd)
+{
+    /* Maximal 32-bit values and longest enum labels exceed 512 bytes. */
+    char line[640],prefix[128];
+    uint32_t oldest,newest,sequence;
+    unsigned count,i,sent=0;
+    int n;
+    wifi_manager_history_snapshot(&oldest,&newest,&count);
+    if (send_json_stream_header(fd)) return;
+    n=snprintf(prefix,sizeof(prefix),
+               "{\"memory_only\":true,\"capacity\":32,\"count\":%u,\"oldest_sequence\":%lu,\"newest_sequence\":%lu,\"records\":[",
+               count,(unsigned long)oldest,(unsigned long)newest);
+    if (n<0 || n>=(int)sizeof(prefix) || recovery_send_all(fd,prefix,(size_t)n)) return;
+    for (i=0,sequence=oldest;i<count;i++,sequence++) {
+        n=wifi_manager_history_record_json(sequence,line,sizeof(line));
+        if (n<=0) continue; /* A concurrent wrap may have replaced this entry. */
+        if (sent++ && recovery_send_all(fd,",",1)) return;
+        if (recovery_send_all(fd,line,(size_t)n)) return;
+    }
+    recovery_send_all(fd,"]}",2);
 }
 static void handle_client(int fd)
 {
@@ -241,10 +286,14 @@ static void handle_client(int fd)
         else if (!strcmp(path,"/api/health")) recovery_send_json(fd,200,"{\"status\":\"ok\",\"recovery\":true}");
         else if (!strcmp(path,"/api/ota/status")) {
             recovery_ota_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/wifi/history")) {
+            send_wifi_history(fd);
         } else if (!strcmp(path,"/api/wifi/status")) {
             wifi_manager_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/ipv6/status")) {
+            ipv6_diagnostic_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/wifi/scan")) {
-            recovery_send_json(fd,200,wifi_manager_scan_json());
+            send_wifi_scan(fd);
         } else if (!strcmp(path,"/api/wifi/settings")) {
             wifi_manager_settings_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/system/stats")) {
@@ -259,7 +308,7 @@ static void handle_client(int fd)
             network_health_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.13\",\"version\":\"0.6.13\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.14\",\"version\":\"0.6.14\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),recovery_hostname(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -274,6 +323,20 @@ static void handle_client(int fd)
         goto done;
     }
     if (strcmp(method,"POST")) { recovery_send_json(fd,405,"{\"message\":\"Method not allowed\"}"); goto done; }
+    if (!strcmp(path,"/api/ipv6/probe")) {
+        int probe_result;
+        if ((seen && length) || body_len) {
+            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"Request body is not allowed\"}"); goto done;
+        }
+        probe_result=ipv6_diagnostic_start();
+        if (!probe_result) recovery_send_json(fd,202,"{\"ok\":true,\"state\":\"running\"}");
+        else if (probe_result==-2 || probe_result==-5)
+            recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"OTA busy or IPv6 probe already running\"}");
+        else if (probe_result==-3)
+            recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"Station IP required for AAAA DNS test\"}");
+        else recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"IPv6 probe unavailable or insufficient heap\"}");
+        goto done;
+    }
     if (!strcmp(path,"/api/logs/clear")) {
         if ((seen && length) || body_len) recovery_send_json(fd,400,"{\"error\":\"Request body is not allowed\"}");
         else { openm1_log_clear(); recovery_send_json(fd,200,"{\"ok\":true}"); }

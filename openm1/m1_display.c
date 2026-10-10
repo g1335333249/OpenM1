@@ -3,6 +3,7 @@
 #include "m1_uart.h"
 #include "config_store.h"
 #include "recovery.h"
+#include "wifi_manager.h"
 #include "mico_hal/mico_pwm.h"
 #include <stdio.h>
 #include <string.h>
@@ -74,6 +75,7 @@ static void network_display_step(void)
         state.blink_phase_on=next_on;
         state.network_applied_target=target;
         mico_rtos_unlock_mutex(&display_mutex);
+        if (target!=previous) wifi_manager_history_note(WIFI_HISTORY_DISPLAY_APPLIED);
         mico_thread_msleep(M1_WIFI_BLINK_INTERVAL_MS);
         return;
     }
@@ -83,6 +85,7 @@ static void network_display_step(void)
     state.blink_phase_on=true;
     state.network_applied_target=target;
     mico_rtos_unlock_mutex(&display_mutex);
+    if (target!=previous) wifi_manager_history_note(WIFI_HISTORY_DISPLAY_APPLIED);
     mico_thread_msleep(100);
 }
 
@@ -257,10 +260,13 @@ void m1_display_handle_brightness_event(uint8_t value)
 
 void m1_display_set_network_state(m1_net_display_state_t target)
 {
+    int changed;
     if (!display_ready || target>M1_NET_DISPLAY_NO_INTERNET) return;
     mico_rtos_lock_mutex(&display_mutex);
+    changed=state.network_target!=target;
     state.network_target=target;
     mico_rtos_unlock_mutex(&display_mutex);
+    if (changed) wifi_manager_history_note(WIFI_HISTORY_DISPLAY_TARGET);
 }
 
 int m1_display_network_test(const char *mode)

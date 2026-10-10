@@ -9,6 +9,8 @@
 /* Advance one worker iteration without a real thread or PWM hardware. */
 #include "../openm1/m1_display.c"
 
+void wifi_manager_history_note(wifi_history_reason_t reason) { (void)reason; }
+
 static uint32_t now=1000;
 static jmp_buf yield_point;
 static int yield_enabled,mutex_depth;

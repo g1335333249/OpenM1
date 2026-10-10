@@ -27,6 +27,8 @@ typedef struct {
     uint32_t boot_auto_connect_not_before_ms;
     int boot_auto_connect_waiting;
     char last_wlan_operation[32];
+    int last_link_query_result,last_ip_query_result,last_query_link_connected;
+    int last_query_ip_valid,last_query_rssi;
     uint32_t wifi_control_loop_count,last_wifi_control_tick_ms;
     int recovery_ap_observed_on,recovery_ap_policy_closed,recovery_ap_restoring;
     uint32_t recovery_ap_restore_count,recovery_ap_last_probe_ms,recovery_ap_last_restore_ms;
@@ -49,8 +51,21 @@ static scan_ap_t scan_aps[WIFI_SCAN_MAX_AP];
 static unsigned scan_count;
 static char scan_state[12]="idle";
 static uint32_t scan_started_ms;
-static char scan_json[3300];
 static int scan_registered;
+/* 32 compact transition snapshots. The old 3300-byte scan JSON buffer is
+ * streamed by HTTP, so this history does not raise the permanent RAM budget. */
+#define WIFI_HISTORY_CAPACITY 32u
+typedef struct {
+    uint32_t sequence,uptime_ms,disconnect_count,native_reconnect_count;
+    uint32_t station_rearm_count,ap_restore_count;
+    int32_t link_query_result,ip_query_result,wlan_error;
+    int16_t rssi,event_code;
+    uint8_t reason,phase,link_connected,ip_valid,health_state;
+    uint8_t display_target,pwm_applied,ap_observed;
+} wifi_history_record_t;
+static wifi_history_record_t wifi_history[WIFI_HISTORY_CAPACITY];
+static uint32_t history_next_sequence=1;
+static unsigned history_head,history_count;
 static volatile uint32_t wifi_connect_fail_count,wifi_fatal_error_count;
 static volatile uint32_t wifi_event_bits;
 static volatile int last_wifi_event_code,last_wifi_connect_fail_error;
@@ -181,16 +196,25 @@ static OSStatus station_start(const wifi_station_desired_t *desired)
 }
 static void station_snapshot(LinkStatusTypeDef *link,IPStatusTypedef *ip,int *good,int *last_error)
 {
-    OSStatus err;
+    OSStatus err,ip_err=-32768;
+    int ip_queried=0;
     memset(link,0,sizeof(*link)); memset(ip,0,sizeof(*ip));
     wlan_operation("get_station_status");
     err=micoWlanGetLinkStatus(link);
-    if (err!=kNoErr) { *good=0; *last_error=err; return; }
-    if (link->is_connected!=1) { *good=0; *last_error=0; return; }
-    err=micoWlanGetIPStatus(ip,Station);
-    ip->ip[sizeof(ip->ip)-1]=0;
-    *good=err==kNoErr && valid_ip(ip->ip);
-    *last_error=err==kNoErr?0:err;
+    if (err==kNoErr && link->is_connected==1) {
+        ip_queried=1;
+        ip_err=micoWlanGetIPStatus(ip,Station);
+        ip->ip[sizeof(ip->ip)-1]=0;
+    }
+    *good=err==kNoErr && link->is_connected==1 && ip_err==kNoErr && valid_ip(ip->ip);
+    *last_error=err!=kNoErr?err:ip_queried?ip_err:0;
+    lock_status();
+    status.last_link_query_result=err;
+    status.last_ip_query_result=ip_err;
+    status.last_query_link_connected=err==kNoErr?link->is_connected:-1;
+    status.last_query_ip_valid=ip_err==kNoErr?valid_ip(ip->ip):-1;
+    status.last_query_rssi=err==kNoErr?link->rssi:0;
+    unlock_status();
 }
 static void station_cache_good(const LinkStatusTypeDef *link,const IPStatusTypedef *ip)
 {
@@ -277,6 +301,7 @@ static void ap_control_step(uint32_t now,wifi_station_phase_t phase,
         (!ota_busy || !station_ready) &&
         (!*next_restore_ms || (int32_t)(now-*next_restore_ms)>=0)) {
         openm1_log_warn("WIFI","Recovery AP missing confirmed; restoring");
+        wifi_manager_history_note(WIFI_HISTORY_AP_MISSING_CONFIRMED);
         lock_status(); status.recovery_ap_restoring=1; unlock_status();
         err=recovery_ap_start();
         mico_thread_msleep(500);
@@ -297,10 +322,12 @@ static void ap_control_step(uint32_t now,wifi_station_phase_t phase,
             if (*rearm_after_restore)
                 *rearm_after_restore_at=mico_rtos_get_time()+2000u;
             openm1_log_info("WIFI","Recovery AP restored");
+            wifi_manager_history_note(WIFI_HISTORY_AP_RESTORED);
         } else {
             uint32_t delay=wifi_ap_restore_backoff_ms((*restore_failure_index)++);
             *next_restore_ms=mico_rtos_get_time()+delay;
             openm1_log_error("WIFI","AP restore failed: %d; retry in %lu ms",err,(unsigned long)delay);
+            wifi_manager_history_note(WIFI_HISTORY_AP_RESTORE_FAILED);
         }
     } else if (observed) {
         *restore_failure_index=0; *next_restore_ms=0;
@@ -336,6 +363,7 @@ static void ap_control_step(uint32_t now,wifi_station_phase_t phase,
                     *ap_probe_failures=0; *ap_missing_since=0; *ap_down_confirmed=0;
                     lock_status(); status.ap_probe_failures=0; unlock_status();
                     openm1_log_info("WIFI","Recovery AP closed after STA ready");
+                    wifi_manager_history_note(WIFI_HISTORY_AP_CLOSED);
                 } else {
                     *next_close_ms=mico_rtos_get_time()+WIFI_AP_CLOSE_RETRY_MS;
                     openm1_log_warn("WIFI","AP close unconfirmed: %d; retry 30s",err);
@@ -379,16 +407,28 @@ static void wifi_control_worker(mico_thread_arg_t arg)
         if (recovery_ota_busy()) { mico_thread_msleep(WIFI_CONTROL_INTERVAL_MS); continue; }
         uint32_t events=__atomic_exchange_n(&wifi_event_bits,0,__ATOMIC_ACQ_REL);
         int changed;
-        if (events&WIFI_EVENT_AP_DOWN) openm1_log_warn("WIFI","AP_DOWN event received");
-        if (events&WIFI_EVENT_AP_UP) openm1_log_info("WIFI","AP_UP event received");
+        if (events&WIFI_EVENT_AP_DOWN) {
+            openm1_log_warn("WIFI","AP_DOWN event received");
+            wifi_manager_history_note(WIFI_HISTORY_AP_DOWN);
+        }
+        if (events&WIFI_EVENT_AP_UP) {
+            openm1_log_info("WIFI","AP_UP event received");
+            wifi_manager_history_note(WIFI_HISTORY_AP_UP);
+        }
+        if (events&WIFI_EVENT_STATION_DOWN)
+            wifi_manager_history_note(WIFI_HISTORY_STATION_DOWN_EVENT);
+        if (events&WIFI_EVENT_STATION_UP)
+            wifi_manager_history_note(WIFI_HISTORY_STATION_UP_EVENT);
         if (wifi_connect_fail_count!=seen_connect_fail) {
             seen_connect_fail=wifi_connect_fail_count;
             openm1_log_warn("WIFI","connect failed: %d (count=%lu)",
                             last_wifi_connect_fail_error,(unsigned long)seen_connect_fail);
+            wifi_manager_history_note(WIFI_HISTORY_CONNECT_FAILED);
         }
         if (wifi_fatal_error_count!=seen_fatal) {
             seen_fatal=wifi_fatal_error_count;
             openm1_log_error("WIFI","fatal event (count=%lu)",(unsigned long)seen_fatal);
+            wifi_manager_history_note(WIFI_HISTORY_WLAN_FATAL);
         }
         if ((events&WIFI_EVENT_AP_DOWN) &&
             (!(events&WIFI_EVENT_AP_UP) || last_wifi_event_code==NOTIFY_AP_DOWN))
@@ -432,6 +472,7 @@ static void wifi_control_worker(mico_thread_arg_t arg)
             unlock_status();
             network_health_notify_link_down();
             display_station_fallback(0);
+            wifi_manager_history_note(WIFI_HISTORY_MANUAL_DISCONNECT);
         } else if (changed && desired.want_connected && armed) {
             /* Explicit SSID/credential replacement, never ordinary link-loss retry. */
             printf("WIFI: explicit Station network switch\r\n");
@@ -443,8 +484,10 @@ static void wifi_control_worker(mico_thread_arg_t arg)
             mico_thread_msleep(500);
             armed=0; phase=WIFI_STA_IDLE; native_since=0;
             wifi_station_samples_reset(&samples);
+            lock_status(); status.station_phase=phase; status.station_armed=0; unlock_status();
             network_health_notify_link_down();
             display_station_fallback(0);
+            wifi_manager_history_note(WIFI_HISTORY_EXPLICIT_SWITCH);
         } else if (changed && !desired.want_connected && armed && phase!=WIFI_STA_CONNECTED) {
             /* AUTO was disabled while its initial association was still pending. */
             err=station_suspend();
@@ -475,9 +518,11 @@ static void wifi_control_worker(mico_thread_arg_t arg)
             lock_status(); status.last_wlan_error=last_error; unlock_status();
             if (phase==WIFI_STA_CONNECTED) {
                 if (good) {
+                    int recovered_sample=samples.bad_samples!=0;
                     wifi_station_note_good(&samples);
                     lock_status(); station_cache_good(&link,&ip);
                     status.consecutive_bad_samples=0; status.consecutive_good_samples=samples.good_samples; unlock_status();
+                    if (recovered_sample) wifi_manager_history_note(WIFI_HISTORY_STATION_SAMPLE_RECOVERED);
                 } else if (wifi_station_note_bad(&samples)) {
                     phase=desired.want_connected?WIFI_STA_NATIVE_RECONNECT_WAIT:WIFI_STA_IDLE;
                     native_since=desired.want_connected?now:0;
@@ -485,6 +530,7 @@ static void wifi_control_worker(mico_thread_arg_t arg)
                     if (status.recovery_ap_policy_closed && desired.want_connected)
                         rearm_after_restore=1;
                     status.disconnect_count++; status.last_disconnect_ms=now;
+                    status.station_phase=phase;
                     status.consecutive_bad_samples=samples.bad_samples;
                     status.consecutive_good_samples=0; status.active=0;
                     status.native_reconnect_since_ms=native_since;
@@ -495,6 +541,7 @@ static void wifi_control_worker(mico_thread_arg_t arg)
                     openm1_log_warn("WIFI","Station link lost; native reconnect waiting");
                     network_health_notify_link_down();
                     display_station_fallback(0);
+                    wifi_manager_history_note(WIFI_HISTORY_STATION_LOST);
                     if (!desired.want_connected) {
                         /* Saved AUTO credentials were cleared during this connection. */
                         err=station_suspend();
@@ -503,6 +550,7 @@ static void wifi_control_worker(mico_thread_arg_t arg)
                     }
                 } else {
                     lock_status(); status.consecutive_bad_samples=samples.bad_samples; unlock_status();
+                    wifi_manager_history_note(WIFI_HISTORY_STATION_BAD);
                 }
             } else {
                 if (good && wifi_station_note_good(&samples)) {
@@ -510,6 +558,7 @@ static void wifi_control_worker(mico_thread_arg_t arg)
                                          phase==WIFI_STA_REARM_WAIT;
                     phase=WIFI_STA_CONNECTED; native_since=0; rearm_wait_until=0;
                     lock_status(); station_cache_good(&link,&ip);
+                    status.station_phase=phase;
                     snprintf(status.state,sizeof(status.state),"connected");
                     status.active=0; status.message[0]=0;
                     status.link_up_since_ms=now; status.last_connect_ms=now;
@@ -525,6 +574,7 @@ static void wifi_control_worker(mico_thread_arg_t arg)
                     if (native_recovered) openm1_log_info("WIFI","Station recovered by native reconnect");
                     network_health_notify_link_ready();
                     display_station_fallback(1);
+                    wifi_manager_history_note(WIFI_HISTORY_STATION_CONNECTED);
                 } else if (!good) {
                     wifi_station_note_bad(&samples);
                     lock_status(); status.consecutive_good_samples=0;
@@ -593,12 +643,13 @@ static void wifi_control_worker(mico_thread_arg_t arg)
                 wifi_station_samples_reset(&samples);
                 phase=armed?WIFI_STA_ARMED_CONNECTING:WIFI_STA_REARM_WAIT;
                 lock_status();
-                status.station_started_once=1; status.station_armed=armed;
+                status.station_started_once=1; status.station_armed=armed; status.station_phase=phase;
                 status.last_wlan_error=err; status.active=1;
                 snprintf(status.ssid,sizeof(status.ssid),"%s",desired.ssid);
                 snprintf(status.state,sizeof(status.state),err==kNoErr?"connecting":"failed");
                 if (err!=kNoErr) snprintf(status.message,sizeof(status.message),"Station 启动失败，稍后重试。");
                 unlock_status();
+                if (!station_started_once) wifi_manager_history_note(WIFI_HISTORY_FIRST_ARM);
                 station_started_once=1;
                 if (err!=kNoErr) {
                     openm1_log_error("WIFI","STA start failed: %d",err);
@@ -619,10 +670,11 @@ static void wifi_control_worker(mico_thread_arg_t arg)
                 phase=armed?WIFI_STA_ARMED_CONNECTING:WIFI_STA_REARM_WAIT;
                 wifi_station_samples_reset(&samples);
                 lock_status();
-                status.station_armed=armed; status.station_rearm_count++;
+                status.station_armed=armed; status.station_phase=phase; status.station_rearm_count++;
                 status.last_station_rearm_ms=last_rearm; status.last_wlan_error=err;
                 status.native_reconnect_since_ms=0;
                 unlock_status();
+                wifi_manager_history_note(WIFI_HISTORY_STATION_REARM);
             }
         }
         lock_status(); status.station_phase=phase; status.station_armed=armed; unlock_status();
@@ -635,6 +687,10 @@ OSStatus wifi_manager_init(void)
 {
     OSStatus err=mico_rtos_init_mutex(&status_mutex);
     if (err!=kNoErr) return err;
+    status.last_link_query_result=-32768;
+    status.last_ip_query_result=-32768;
+    status.last_query_link_connected=-1;
+    status.last_query_ip_valid=-1;
     manager_ready=1;
     err=mico_system_notify_register(mico_notify_WIFI_SCAN_ADV_COMPLETED,(void *)scan_complete,NULL);
     scan_registered=err==kNoErr;
@@ -799,6 +855,108 @@ static const char *station_phase_name(wifi_station_phase_t phase)
     default: return "unknown";
     }
 }
+static const char *history_reason_name(uint8_t reason)
+{
+    static const char *const names[]={
+        "station_bad_sample","station_sample_recovered","station_lost",
+        "station_connected","controlled_rearm","ap_down_event","ap_up_event",
+        "ap_restored","ap_closed","network_health_changed","display_target_changed",
+        "pwm_applied_changed","wlan_fatal","connect_failed",
+        "manual_disconnect","first_station_arm","explicit_network_switch",
+        "station_up_event","station_down_event","ap_missing_confirmed",
+        "ap_restore_failed"
+    };
+    return reason<sizeof(names)/sizeof(names[0])?names[reason]:"unknown";
+}
+static const char *history_health_name(uint8_t state)
+{
+    return state==NETWORK_CHECKING?"checking":state==NETWORK_ONLINE?"online":
+           state==NETWORK_NO_INTERNET?"no_internet":"no_wifi";
+}
+static const char *history_display_name(uint8_t target)
+{
+    return target==M1_NET_DISPLAY_ONLINE?"solid":
+           target==M1_NET_DISPLAY_NO_INTERNET?"solid_red_x":
+           target==M1_NET_DISPLAY_DISCONNECTED?"blink":"uninitialized";
+}
+void wifi_manager_history_note(wifi_history_reason_t reason)
+{
+    wifi_history_record_t *entry;
+    m1_display_status_t display;
+    network_health_state_t health;
+    if (!manager_ready) return;
+    /* Snapshot other modules before status_mutex: these locks never nest. */
+    health=network_health_current_state();
+    m1_display_get_status(&display);
+    lock_status();
+    entry=&wifi_history[history_head];
+    entry->sequence=history_next_sequence++;
+    entry->uptime_ms=mico_rtos_get_time();
+    entry->disconnect_count=status.disconnect_count;
+    entry->native_reconnect_count=status.native_reconnect_success_count;
+    entry->station_rearm_count=status.station_rearm_count;
+    entry->ap_restore_count=status.recovery_ap_restore_count;
+    entry->link_query_result=status.last_link_query_result;
+    entry->ip_query_result=status.last_ip_query_result;
+    entry->wlan_error=(reason==WIFI_HISTORY_AP_DOWN ||
+                       reason==WIFI_HISTORY_AP_MISSING_CONFIRMED ||
+                       reason==WIFI_HISTORY_AP_RESTORE_FAILED)?
+                      status.recovery_ap_last_error:status.last_wlan_error;
+    entry->rssi=(int16_t)status.last_query_rssi;
+    entry->event_code=(int16_t)(reason==WIFI_HISTORY_AP_DOWN?NOTIFY_AP_DOWN:
+        reason==WIFI_HISTORY_AP_UP?NOTIFY_AP_UP:
+        reason==WIFI_HISTORY_STATION_DOWN_EVENT?NOTIFY_STATION_DOWN:
+        reason==WIFI_HISTORY_STATION_UP_EVENT?NOTIFY_STATION_UP:last_wifi_event_code);
+    entry->reason=(uint8_t)reason;
+    entry->phase=(uint8_t)status.station_phase;
+    entry->link_connected=(uint8_t)(status.last_query_link_connected+1);
+    entry->ip_valid=(uint8_t)(status.last_query_ip_valid+1);
+    entry->health_state=(uint8_t)health;
+    entry->display_target=(uint8_t)display.network_target;
+    entry->pwm_applied=(uint8_t)display.network_applied_target;
+    entry->ap_observed=(uint8_t)status.recovery_ap_observed_on;
+    history_head=(history_head+1u)%WIFI_HISTORY_CAPACITY;
+    if (history_count<WIFI_HISTORY_CAPACITY) history_count++;
+    unlock_status();
+}
+void wifi_manager_history_snapshot(uint32_t *oldest,uint32_t *newest,unsigned *count)
+{
+    lock_status();
+    if (count) *count=history_count;
+    if (oldest) *oldest=history_count?history_next_sequence-history_count:0;
+    if (newest) *newest=history_count?history_next_sequence-1u:0;
+    unlock_status();
+}
+int wifi_manager_history_record_json(uint32_t sequence,char *out,size_t capacity)
+{
+    wifi_history_record_t entry;
+    unsigned i;
+    int found=0,n;
+    if (!out || !capacity) return -1;
+    lock_status();
+    for (i=0;i<history_count;i++) {
+        unsigned slot=(history_head+WIFI_HISTORY_CAPACITY-history_count+i)%WIFI_HISTORY_CAPACITY;
+        if (wifi_history[slot].sequence==sequence) { entry=wifi_history[slot]; found=1; break; }
+    }
+    unlock_status();
+    if (!found) return 0;
+    n=snprintf(out,capacity,
+      "{\"seq\":%lu,\"uptime_ms\":%lu,\"reason\":\"%s\",\"station_phase\":\"%s\","
+      "\"link_query_result\":%ld,\"ip_query_result\":%ld,\"link_connected\":%d,"
+      "\"ip_valid\":%d,\"rssi\":%d,\"wlan_error\":%ld,\"wifi_event_code\":%d,"
+      "\"disconnect_count\":%lu,\"native_reconnect_count\":%lu,\"station_rearm_count\":%lu,"
+      "\"ap_restore_count\":%lu,\"ap_observed\":%s,\"network_health\":\"%s\","
+      "\"display_target\":\"%s\",\"pwm_applied\":\"%s\"}",
+      (unsigned long)entry.sequence,(unsigned long)entry.uptime_ms,
+      history_reason_name(entry.reason),station_phase_name((wifi_station_phase_t)entry.phase),
+      (long)entry.link_query_result,(long)entry.ip_query_result,(int)entry.link_connected-1,
+      (int)entry.ip_valid-1,(int)entry.rssi,(long)entry.wlan_error,(int)entry.event_code,
+      (unsigned long)entry.disconnect_count,(unsigned long)entry.native_reconnect_count,
+      (unsigned long)entry.station_rearm_count,(unsigned long)entry.ap_restore_count,
+      entry.ap_observed?"true":"false",history_health_name(entry.health_state),
+      history_display_name(entry.display_target),history_display_name(entry.pwm_applied));
+    return n>=0 && (size_t)n<capacity?n:-1;
+}
 void wifi_manager_status_json(char *out,size_t out_size)
 {
     wifi_status_t snapshot;
@@ -894,28 +1052,32 @@ static const char *security_name(wlan_sec_type_t security)
     default: return "UNKNOWN";
     }
 }
-const char *wifi_manager_scan_json(void)
+int wifi_manager_scan_snapshot(char state_out[12],unsigned *count_out)
 {
-    unsigned i;
-    size_t used;
-    if (!scan_registered) return "{\"supported\":false,\"state\":\"failed\",\"networks\":[]}";
+    if (!state_out || !count_out) return 0;
+    if (!scan_registered) { strcpy(state_out,"failed"); *count_out=0; return 0; }
     lock_status();
     if (!strcmp(scan_state,"scanning") && mico_rtos_get_time()-scan_started_ms>15000)
         strcpy(scan_state,"failed");
-    used=(size_t)snprintf(scan_json,sizeof(scan_json),"{\"supported\":true,\"state\":\"%s\",\"networks\":[",scan_state);
-    for (i=0;i<scan_count && used+160<sizeof(scan_json);i++) {
-        char escaped[70];
-        int n;
-        json_string(escaped,sizeof(escaped),scan_aps[i].ssid);
-        n=snprintf(scan_json+used,sizeof(scan_json)-used,
-            "%s{\"ssid\":\"%s\",\"rssi\":%d,\"security\":\"%s\",\"channel\":%u}",
-            i?",":"",escaped,scan_aps[i].rssi,security_name(scan_aps[i].security),scan_aps[i].channel);
-        if (n<0 || (size_t)n>=sizeof(scan_json)-used) break;
-        used+=(size_t)n;
-    }
-    snprintf(scan_json+used,sizeof(scan_json)-used,"]}");
+    strcpy(state_out,scan_state);
+    *count_out=scan_count;
     unlock_status();
-    return scan_json;
+    return 1;
+}
+int wifi_manager_scan_record_json(unsigned index,char *out,size_t capacity)
+{
+    scan_ap_t ap;
+    char escaped[70];
+    int n;
+    if (!out || !capacity) return -1;
+    lock_status();
+    if (index>=scan_count) { unlock_status(); return 0; }
+    ap=scan_aps[index];
+    unlock_status();
+    json_string(escaped,sizeof(escaped),ap.ssid);
+    n=snprintf(out,capacity,"{\"ssid\":\"%s\",\"rssi\":%d,\"security\":\"%s\",\"channel\":%u}",
+               escaped,ap.rssi,security_name(ap.security),ap.channel);
+    return n>=0 && (size_t)n<capacity?n:-1;
 }
 int wifi_manager_station_ready(void)
 {

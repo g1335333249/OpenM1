@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.13
+PREFIX=OpenM1-v0.6.14
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 if [[ "$(uname -s)" == Darwin ]]; then BUILD_HOST_OS=OSX; else BUILD_HOST_OS=Linux64; fi
 TOOL=".micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/$BUILD_HOST_OS/bin"
@@ -14,6 +14,8 @@ python3 tests/test_web_tabs.py
 python3 tests/test_v012_api_console.py
 node tests/test_api_console.js
 node tests/test_button_web.js
+python3 tests/test_v014_diagnostics_static.py
+node tests/test_v014_diagnostics_web.js
 python3 tests/test_v013_factory_reset_static.py
 python3 tests/test_v063_static.py
 python3 tests/test_v063_safety.py
@@ -104,7 +106,7 @@ for symbol in m1_uart_init m1_uart_worker m1_uart_send_init_command m1_uart_requ
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
-for symbol in button_manager_init button_manager_note_long_press button_manager_tick button_manager_status_json; do
+for symbol in button_manager_init button_manager_note_long_press button_manager_tick button_manager_status_json ipv6_diagnostic_init ipv6_diagnostic_start wifi_manager_history_note wifi_manager_history_record_json; do
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
@@ -115,7 +117,7 @@ done
 grep -Fq 'mico_notify_WIFI_SCAN_ADV_COMPLETED' openm1/wifi_manager.c
 grep -Fq 'micoWlanStartScanAdv()' openm1/wifi_manager.c
 echo '[PASS] SDK advanced scan callback and API'
-for route in /api/logs /api/logs/download /api/logs/clear /api/ota/prepare /api/wifi/status /api/wifi/settings /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/system/stats /api/sensors /api/uart/status /api/uart/raw /api/button/status /api/uart/config /api/uart/init /api/uart/sensor-request /api/display/status /api/display/brightness /api/display/network-test /api/network/health /api/ota/status /api/ota/upload /api/ota/url /api/reboot /api/mqtt/status /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
+for route in /api/logs /api/logs/download /api/logs/clear /api/ota/prepare /api/wifi/status /api/wifi/history /api/ipv6/status /api/ipv6/probe /api/wifi/settings /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/system/stats /api/sensors /api/uart/status /api/uart/raw /api/button/status /api/uart/config /api/uart/init /api/uart/sensor-request /api/display/status /api/display/brightness /api/display/network-test /api/network/health /api/ota/status /api/ota/upload /api/ota/url /api/reboot /api/mqtt/status /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
   if ! "$TOOL/arm-none-eabi-strings" "dist/$PREFIX.elf" | grep -F "$route" >/dev/null; then echo "[FAIL] missing route $route"; exit 1; fi
   echo "[PASS] $route"
 done

@@ -4,7 +4,7 @@ const vm=require('node:vm');
 const html=fs.readFileSync('openm1/recovery_page.html','utf8');
 const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 new vm.Script(script);
-const part=script.split("let lastButtonState='idle',lastButtonTick=0;",2)[1].split('async function refreshUart()',1)[0];
+const part=script.split("let lastButtonState='idle',lastButtonTick=0;",2)[1].split('let wifiHistory=null;',1)[0];
 const elements=new Map();
 const $=id=>{if(!elements.has(id))elements.set(id,{textContent:''});return elements.get(id)};
 let response={factory_reset_state:'waiting_confirmation',confirmation_remaining_ms:12000,

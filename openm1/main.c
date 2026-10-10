@@ -12,6 +12,7 @@
 #include "openm1_log.h"
 #include "worker_retry_logic.h"
 #include "button_manager.h"
+#include "ipv6_diagnostic.h"
 
 /* Implemented by the pinned SDK's MiCO/net/mocIP/mico/mico_socket.c. */
 extern char *sethostname(char *name);
@@ -126,11 +127,11 @@ int main(void)
     result=openm1_log_init();
     if (result!=kNoErr) printf("BOOT: RAM logger unavailable: %d\r\n",result);
     openm1_log_info("BOOT","app_thread stack configured = %lu",(unsigned long)app_stack_size);
-    openm1_log_info("BOOT","OpenM1 v0.6.13");
+    openm1_log_info("BOOT","OpenM1 v0.6.14");
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.13\r\n"
+           "Version: 0.6.14\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -231,6 +232,8 @@ int main(void)
     wifi_result=wifi_manager_init();
     boot_log_init_error("Wi-Fi manager",wifi_result);
     openm1_log_info("BOOT","Wi-Fi manager init result = %d",wifi_result);
+    result=ipv6_diagnostic_init(); /* State only; no IPv6 API runs at boot. */
+    boot_log_init_error("IPv6 diagnostic",result);
     if (wifi_result==kNoErr)
         wifi_manager_set_initial_ap_state(ap_result==kNoErr);
     system_stats_set_boot_phase("core");

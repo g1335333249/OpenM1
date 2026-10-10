@@ -11,7 +11,7 @@ for sensor in ('temperature','humidity','pm25','formaldehyde'):
 assert '/number/%s/brightness/config' in ha
 for field in ('屏幕亮度','%s_brightness','%s/brightness/set','value_json.brightness',
               '\\"min\\":0','\\"max\\":4','\\"step\\":1','\\"mode\\":\\"slider',
-              'availability_topic','payload_available','payload_not_available','OpenM1 v0.6.13'):
+              'availability_topic','payload_available','payload_not_available','OpenM1 v0.6.14'):
     assert field in ha, field
 assert 'if (remove) payload[0]=0' in ha
 assert ha.count('MQTTPublish(client,topic,&message)')==2
@@ -35,5 +35,5 @@ assert 'h.entity_count||5' in page
 assert 'recovery_ota_busy()' in display
 assert '#define OPENM1_CONFIG_VERSION 3u' in Path('openm1/config_store.h').read_text()
 assert 'WIFI_BOOT_AUTO_CONNECT_GRACE_MS 60000u' in Path('openm1/wifi_station_logic.h').read_text()
-assert '0.6.13' in Path('openm1/main.c').read_text()
+assert '0.6.14' in Path('openm1/main.c').read_text()
 print('V010_HA_BRIGHTNESS_STATIC_PASS')
