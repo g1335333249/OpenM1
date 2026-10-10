@@ -7,11 +7,11 @@ page = Path('openm1/recovery_page.html').read_text()
 http = Path('openm1/recovery_http.c').read_text()
 catalog = page.split('const apiEndpoints=[', 1)[1].split('];', 1)[0]
 entries = re.findall(r"\{method:'(GET|POST)',path:'([^']+)',category:'([^']+)',name:'([^']+)'", catalog)
-assert len(entries) == 39 and len(set((m, p) for m, p, _, _ in entries)) == 39
+assert len(entries) == 40 and len(set((m, p) for m, p, _, _ in entries)) == 40
 get = http.split('if (!strcmp(method,"GET"))', 1)[1].split('if (strcmp(method,"POST"))', 1)[0]
 post = http.split('if (strcmp(method,"POST"))', 1)[1].split('recovery_send_json(fd,404', 1)[0]
 routes = lambda part: set(re.findall(r'(?:strcmp|strncmp)\(path,"(/api/[^\"]+)', part))
-for method, section, expected in [('GET', get, 19), ('POST', post, 20)]:
+for method, section, expected in [('GET', get, 19), ('POST', post, 21)]:
     actual = {p.split('?', 1)[0] for m, p, _, _ in entries if m == method}
     assert actual == routes(section), (method, actual ^ routes(section))
     assert len(actual) == expected
@@ -30,6 +30,6 @@ assert "document.execCommand('copy')" in page
 assert "const tabIds=['overview','network','mqtt','homeassistant','update','diagnostics','api','system']" in page
 assert "else if(activeTab==='api')" not in page
 assert 'localStorage' not in catalog
-assert 'OpenM1 v0.6.15' in Path('openm1/homeassistant.c').read_text()
+assert 'OpenM1 v0.6.16' in Path('openm1/homeassistant.c').read_text()
 assert 'homeassistant_entity_count\':5' in Path('tools/generate_manifest.py').read_text()
-print('API_CONSOLE_STATIC_PASS: 19 GET + 20 POST match firmware router')
+print('API_CONSOLE_STATIC_PASS: 19 GET + 21 POST match firmware router')

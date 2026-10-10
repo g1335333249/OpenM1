@@ -167,7 +167,7 @@ static int read_small_body(int fd,const char *request,int start,size_t initial,
 static void send_log_download(int fd)
 {
     static const char header[]="HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
-        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.15-log.txt\"\r\n"
+        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.16-log.txt\"\r\n"
         "Connection: close\r\nCache-Control: no-store\r\n\r\n";
     openm1_log_status_t status;
     openm1_log_record_t record;
@@ -176,7 +176,7 @@ static void send_log_download(int fd)
     int n;
     openm1_log_status(&status);
     if (recovery_send_all(fd,header,sizeof(header)-1u)) return;
-    n=snprintf(line,sizeof(line),"OpenM1 v0.6.15\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
+    n=snprintf(line,sizeof(line),"OpenM1 v0.6.16\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
                recovery_hostname(),(unsigned long)mico_rtos_get_time());
     if (n>0 && n<(int)sizeof(line) && recovery_send_all(fd,line,(size_t)n)) return;
     if (!status.available) {
@@ -308,7 +308,7 @@ static void handle_client(int fd)
             network_health_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.15\",\"version\":\"0.6.15\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.16\",\"version\":\"0.6.16\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),recovery_hostname(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -323,17 +323,34 @@ static void handle_client(int fd)
         goto done;
     }
     if (strcmp(method,"POST")) { recovery_send_json(fd,405,"{\"message\":\"Method not allowed\"}"); goto done; }
-    if (!strcmp(path,"/api/ipv6/probe")) {
+    if (!strcmp(path,"/api/ipv6/probe") || !strcmp(path,"/api/ipv6/probe/tcp")) {
         int probe_result;
-        if ((seen && length) || body_len) {
+        if (!strcmp(path,"/api/ipv6/probe/tcp")) {
+            char confirmation[65]; json_min_field_t field[1];
+            int parsed;
+            if (!seen || !read_small_body(fd,request,body_start,body_len,length,
+                                          confirmation,sizeof(confirmation))) {
+                recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"IPv6 TCP confirmation required\"}"); goto done;
+            }
+            parsed=json_min_parse(confirmation,length,field,1);
+            if (parsed!=1 || strcmp(field[0].key,"confirm_ipv6_tcp") ||
+                field[0].kind!='b' || strcmp(field[0].value,"true")) {
+                recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"Explicit IPv6 TCP confirmation required\"}"); goto done;
+            }
+        } else if ((seen && length) || body_len) {
             recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"Request body is not allowed\"}"); goto done;
         }
-        probe_result=ipv6_diagnostic_start();
+        probe_result=!strcmp(path,"/api/ipv6/probe/tcp")?
+            ipv6_diagnostic_start_tcp():ipv6_diagnostic_start();
         if (!probe_result) recovery_send_json(fd,202,"{\"ok\":true,\"state\":\"running\"}");
         else if (probe_result==-2 || probe_result==-5)
             recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"OTA busy or IPv6 probe already running\"}");
         else if (probe_result==-3)
             recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"Station IP required for AAAA DNS test\"}");
+        else if (probe_result==-7)
+            recovery_send_json(fd,429,"{\"ok\":false,\"message\":\"Please wait 30 seconds before another IPv6 probe\"}");
+        else if (probe_result==-8)
+            recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"IPv6 TCP experiment is disabled in this build\"}");
         else recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"IPv6 probe unavailable or insufficient heap\"}");
         goto done;
     }
