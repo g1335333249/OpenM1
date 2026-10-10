@@ -64,7 +64,7 @@ assert "$('display-brightness').addEventListener('input',showBrightnessLabel)" i
 assert "$('display-brightness').addEventListener('change',async()=>" in source
 assert '重新同步显示状态' in source
 assert '本版不会自动轮询' not in source
-assert 'wifiSettingsInitialized' in source and 'syncApOffControl' in source
+assert 'wifiSettingsInitialized' in source and 'wifi-ap-off' not in source
 assert "if(activeTab==='system'&&now-lastTabTick>=3000)" in source
 assert "$('wifi-saved-password').value=''" in source
 assert 'password_nonempty' in source and 'Flash 存储' in source

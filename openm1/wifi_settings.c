@@ -1,5 +1,6 @@
 #include "wifi_settings.h"
 #include "json_min.h"
+#include "wifi_station_logic.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -52,9 +53,8 @@ int wifi_settings_apply_json(const char *body,size_t length,openm1_config_t *nex
     if (auto_connect) next->wifi_auto_connect=!strcmp(auto_connect->value,"true");
     if (!next->wifi_auto_connect) next->ap_disable_after_sta_connected=0;
     if (ap_off) {
-        if (!strcmp(ap_off->value,"true") &&
-            (!next->wifi_auto_connect || !next->wifi_ssid[0])) return -2;
-        next->ap_disable_after_sta_connected=!strcmp(ap_off->value,"true");
+        if (!strcmp(ap_off->value,"true")) return -5;
+        next->ap_disable_after_sta_connected=0;
     }
     if (next->wifi_auto_connect && !next->wifi_ssid[0]) return -1;
     return 0;
@@ -63,7 +63,7 @@ int wifi_settings_apply_json(const char *body,size_t length,openm1_config_t *nex
 int wifi_ap_policy_can_close(const openm1_config_t *config,int station_ready,
                              int saved_ssid_matches,int ota_busy)
 {
-    return config && config->wifi_auto_connect && config->ap_disable_after_sta_connected &&
+    return WIFI_AP_AUTO_CLOSE_SUPPORTED && config && config->wifi_auto_connect && config->ap_disable_after_sta_connected &&
            config->wifi_ssid[0] && station_ready && saved_ssid_matches && !ota_busy;
 }
 
@@ -84,7 +84,7 @@ void wifi_settings_json(const openm1_config_t *config,char *out,size_t capacity)
     json_escape(config->wifi_ssid,ssid,sizeof(ssid));
     snprintf(out,capacity,
       "{\"saved_ssid\":\"%s\",\"credential_saved\":%s,\"password_nonempty\":%s,"
-      "\"auto_connect\":%s,\"disable_ap_after_connect\":%s}",
+      "\"auto_connect\":%s,\"disable_ap_after_connect\":false,\"ap_auto_close_supported\":false,\"legacy_saved_ap_close_requested\":%s}",
       ssid,config->wifi_ssid[0]?"true":"false",config->wifi_password[0]?"true":"false",
       config->wifi_auto_connect?"true":"false",
       config->ap_disable_after_sta_connected?"true":"false");

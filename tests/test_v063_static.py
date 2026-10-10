@@ -5,7 +5,7 @@ main=Path('openm1/main.c').read_text()
 http=Path('openm1/recovery_http.c').read_text()
 page=Path('openm1/recovery_page.html').read_text()
 manifest=Path('tools/generate_manifest.py').read_text()
-assert '0.6.14' in main and '0.6.14' in http and '0.6.14' in manifest
+assert '0.6.15' in main and '0.6.15' in http and '0.6.15' in manifest
 assert 'wifi_control_worker(mico_thread_arg_t arg)' in wifi
 assert wifi.count('mico_rtos_create_thread(')==1
 for old in ('ap_policy_worker','wifi_station_supervisor_worker','wlan_control_mutex','station_supervisor_thread','ap_policy_thread','openm1_config_t config;\n    OSStatus err;\n    int eligible'):
@@ -25,7 +25,7 @@ assert worker.index('if (disconnect)') < worker.index('station_suspend();')
 assert 'if (!armed && !boot_waiting' in worker and 'station_start(&desired)' in worker
 assert worker.index('ap_control_step(') < worker.index('if (desired.want_connected')
 assert 'micoWlanGetLinkStatus' in wifi and 'micoWlanGetIPStatus(&ap,Soft_AP)' in wifi
-assert 'micoWlanSuspendSoftAP' in wifi and 'StartNetwork(&config)' in wifi
+assert '#if WIFI_AP_AUTO_CLOSE_SUPPORTED' in wifi and 'WIFI_AP_AUTO_CLOSE_SUPPORTED 0' in logic and 'StartNetwork(&config)' in wifi
 for name in ('wifi_manager_connect','wifi_manager_disconnect','wifi_manager_start_scan','wifi_manager_status_json'):
     body=wifi.split(' '+name+'(',1)[1].split('\n}',1)[0]
     for hal in ('StartNetwork(', 'micoWlanSuspendStation(', 'micoWlanSuspendSoftAP(', 'micoWlanGetLinkStatus(', 'micoWlanGetIPStatus(', 'micoWlanStartScanAdv('):

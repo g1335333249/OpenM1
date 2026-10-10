@@ -31,12 +31,20 @@ int main(void)
     assert(wifi_station_rearm_due(61000,1000,0));
     assert(!wifi_station_rearm_due(62000,1000,30000));
     assert(wifi_station_rearm_due(90000,1000,30000));
-    assert(wifi_ap_close_eligible(1,1,1,1,0));
+    assert(!wifi_ap_close_eligible(1,1,1,1,0)); /* legacy true is ignored on .023 */
     assert(!wifi_ap_close_eligible(0,1,1,1,0));
     assert(!wifi_ap_close_eligible(1,0,1,1,0));
     assert(!wifi_ap_close_eligible(1,1,0,1,0));
     assert(!wifi_ap_close_eligible(1,1,1,0,0));
     assert(!wifi_ap_close_eligible(1,1,1,1,1));
+    /* One hour of healthy STA samples with a legacy saved close flag must
+     * neither qualify AP close nor manufacture a Station loss. */
+    wifi_station_samples_reset(&samples);
+    for (i=0;i<3600;i++) {
+        assert(wifi_station_note_good(&samples) == (i!=0));
+        assert(!wifi_ap_close_eligible(1,1,1,1,0));
+        assert(!samples.bad_samples);
+    }
     assert(!wifi_ap_close_timing_ready(119999,60000,0));
     assert(!wifi_ap_close_timing_ready(120000,100000,0));
     assert(wifi_ap_close_timing_ready(130000,100000,0));

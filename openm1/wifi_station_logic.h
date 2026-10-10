@@ -16,6 +16,8 @@
 #define WIFI_AP_BOOT_SELF_HEAL_HOLD_MS 15000u
 #define WIFI_AP_BOOT_FAILSAFE_MS 120000u
 #define WIFI_AP_STABLE_BEFORE_CLOSE_MS 30000u
+/* SuspendSoftAP correlates with real STA loss on the fixed .023 kernel. */
+#define WIFI_AP_AUTO_CLOSE_SUPPORTED 0
 #define WIFI_AP_CLOSE_RETRY_MS 30000u
 
 typedef enum { WIFI_DESIRED_NONE, WIFI_DESIRED_MANUAL, WIFI_DESIRED_AUTO } wifi_desired_source_t;

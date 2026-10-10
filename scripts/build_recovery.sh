@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.14
+PREFIX=OpenM1-v0.6.15
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 if [[ "$(uname -s)" == Darwin ]]; then BUILD_HOST_OS=OSX; else BUILD_HOST_OS=Linux64; fi
 TOOL=".micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/$BUILD_HOST_OS/bin"
@@ -15,6 +15,7 @@ python3 tests/test_v012_api_console.py
 node tests/test_api_console.js
 node tests/test_button_web.js
 python3 tests/test_v014_diagnostics_static.py
+python3 tests/test_v015_ap_policy_static.py
 node tests/test_v014_diagnostics_web.js
 python3 tests/test_v013_factory_reset_static.py
 python3 tests/test_v063_static.py
@@ -92,6 +93,11 @@ cp "$APP_ELF" "dist/$PREFIX.elf"
 cp "$APP_MAP" "dist/$PREFIX.map"
 cp build.log dist/build.log
 echo '[PASS] MK3080B@moc build'
+if "$TOOL/arm-none-eabi-nm" -u build/openm1@MK3080B@moc/modules/openm1/wifi_manager.o | grep -q 'micoWlanSuspendSoftAP'; then
+    echo '[FAIL] runtime Wi-Fi manager still references SuspendSoftAP' >&2
+    exit 1
+fi
+echo '[PASS] runtime Wi-Fi manager has no SuspendSoftAP reference'
 python3 tools/verify_app.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --objdump "$TOOL/arm-none-eabi-objdump" --symbols dist/symbols.txt --report dist/app-header-report.txt
 python3 tools/verify_app_stack.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --objdump "$TOOL/arm-none-eabi-objdump" --app-header-report dist/app-header-report.txt --output dist/app-stack-report.txt
 python3 tests/test_app_stack_runtime.py --elf "dist/$PREFIX.elf" --nm "$TOOL/arm-none-eabi-nm" --objdump "$TOOL/arm-none-eabi-objdump" --app-header-report dist/app-header-report.txt

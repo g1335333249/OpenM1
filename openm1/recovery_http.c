@@ -167,7 +167,7 @@ static int read_small_body(int fd,const char *request,int start,size_t initial,
 static void send_log_download(int fd)
 {
     static const char header[]="HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
-        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.14-log.txt\"\r\n"
+        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.15-log.txt\"\r\n"
         "Connection: close\r\nCache-Control: no-store\r\n\r\n";
     openm1_log_status_t status;
     openm1_log_record_t record;
@@ -176,7 +176,7 @@ static void send_log_download(int fd)
     int n;
     openm1_log_status(&status);
     if (recovery_send_all(fd,header,sizeof(header)-1u)) return;
-    n=snprintf(line,sizeof(line),"OpenM1 v0.6.14\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
+    n=snprintf(line,sizeof(line),"OpenM1 v0.6.15\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
                recovery_hostname(),(unsigned long)mico_rtos_get_time());
     if (n>0 && n<(int)sizeof(line) && recovery_send_all(fd,line,(size_t)n)) return;
     if (!status.available) {
@@ -308,7 +308,7 @@ static void handle_client(int fd)
             network_health_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.14\",\"version\":\"0.6.14\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.15\",\"version\":\"0.6.15\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),recovery_hostname(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -351,7 +351,7 @@ static void handle_client(int fd)
         result=wifi_manager_save_settings(body,length);
         memset(body,0,sizeof(body));
         if (result==0) recovery_send_json(fd,200,"{\"ok\":true}");
-        else if (result==-2) recovery_send_json(fd,409,"{\"error\":\"必须先启用开机自动连接 Wi-Fi，才能设置连接成功后关闭 AP\"}");
+        else if (result==-5) recovery_send_json(fd,409,"{\"error\":\"当前 Kernel 暂不支持安全地自动关闭 Recovery AP\"}");
         else if (result==-3) recovery_send_json(fd,409,"{\"error\":\"固件升级期间不能保存 Wi-Fi 设置\"}");
         else if (result==-4) recovery_send_json(fd,503,"{\"error\":\"配置存储或 AP 策略暂不可用\"}");
         else recovery_send_json(fd,400,"{\"error\":\"Wi-Fi 设置字段格式无效\"}");

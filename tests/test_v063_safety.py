@@ -50,9 +50,8 @@ assert 'Insufficient free memory for safe OTA' in http and 'ota_result==-2?503:4
 assert 'WIFI_AP_BOOT_FAILSAFE_MS 120000u' in logic
 assert 'WIFI_AP_STABLE_BEFORE_CLOSE_MS 30000u' in logic
 assert 'WIFI_AP_CLOSE_RETRY_MS 30000u' in logic
-assert 'wifi_ap_close_timing_ready' in wifi
-assert 'station_snapshot(&final_link,&final_ip,&final_good,&final_error)' in wifi
-assert wifi.index('station_snapshot(&final_link') < wifi.index('micoWlanSuspendSoftAP()')
+assert '#if WIFI_AP_AUTO_CLOSE_SUPPORTED' in wifi
+assert 'WIFI_AP_AUTO_CLOSE_SUPPORTED 0' in logic
 assert 'rearm_after_restore' in wifi and 'one-time Station arm after Recovery AP restore' in wifi
 assert 'mico_thread_msleep(500);' in wifi and 'err=station_start(&desired);' in wifi
 for notice in ('mico_notify_WIFI_CONNECT_FAILED','mico_notify_WIFI_Fatal_ERROR','mico_notify_WIFI_STATUS_CHANGED'):

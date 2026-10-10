@@ -33,7 +33,8 @@ int wifi_station_rearm_due(uint32_t now,uint32_t wait_since,uint32_t last_rearm)
 int wifi_ap_close_eligible(int auto_connect,int disable_after_connect,
                            int station_ready,int ssid_match,int ota_busy)
 {
-    return auto_connect && disable_after_connect && station_ready && ssid_match && !ota_busy;
+    return WIFI_AP_AUTO_CLOSE_SUPPORTED && auto_connect && disable_after_connect &&
+           station_ready && ssid_match && !ota_busy;
 }
 int wifi_ap_close_timing_ready(uint32_t now,uint32_t ready_since,uint32_t next_close_ms)
 {

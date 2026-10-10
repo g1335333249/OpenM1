@@ -13,6 +13,7 @@ typedef struct {
     char saved_ssid[32];
     uint8_t auto_connect;
     uint8_t disable_ap_after_connect;
+    uint8_t saved_ap_close_requested;
 } wifi_policy_t;
 
 typedef struct {
@@ -332,6 +333,9 @@ static void ap_control_step(uint32_t now,wifi_station_phase_t phase,
     } else if (observed) {
         *restore_failure_index=0; *next_restore_ms=0;
     }
+    /* The fixed MK3080B .023 kernel has shown STA loss near AP auto-close.
+     * Keep this operation out of the compiled image until hardware validation. */
+#if WIFI_AP_AUTO_CLOSE_SUPPORTED
     if (eligible && observed) {
         if (!*eligible_since) {
             *eligible_since=now?now:1;
@@ -352,6 +356,7 @@ static void ap_control_step(uint32_t now,wifi_station_phase_t phase,
                 station_snapshot(&final_link,&final_ip,&final_good,&final_error);
                 if (!final_good) { *eligible_since=0; return; }
                 wlan_operation("suspend_softap");
+                wifi_manager_history_note(WIFI_HISTORY_AP_CLOSE_ATTEMPT);
                 openm1_log_info("WIFI","calling SuspendSoftAP");
                 err=micoWlanSuspendSoftAP();
                 openm1_log_info("WIFI","SuspendSoftAP result = %d",err);
@@ -367,11 +372,16 @@ static void ap_control_step(uint32_t now,wifi_station_phase_t phase,
                 } else {
                     *next_close_ms=mico_rtos_get_time()+WIFI_AP_CLOSE_RETRY_MS;
                     openm1_log_warn("WIFI","AP close unconfirmed: %d; retry 30s",err);
+                    wifi_manager_history_note(WIFI_HISTORY_AP_CLOSE_FAILED);
                 }
             }
             *eligible_since=0;
         }
     }
+#else
+    (void)eligible_since;
+    (void)next_close_ms;
+#endif
 }
 
 static void wifi_control_worker(mico_thread_arg_t arg)
@@ -737,7 +747,8 @@ OSStatus wifi_manager_apply_boot_settings(void)
     lock_status();
     snprintf(policy.saved_ssid,sizeof(policy.saved_ssid),"%s",config.wifi_ssid);
     policy.auto_connect=config.wifi_auto_connect;
-    policy.disable_ap_after_connect=config.ap_disable_after_sta_connected;
+    policy.saved_ap_close_requested=config.ap_disable_after_sta_connected;
+    policy.disable_ap_after_connect=0;
     if (config.wifi_auto_connect && config.wifi_ssid[0]) {
         wifi_station_desire(&desired_station,config.wifi_ssid,config.wifi_password,WIFI_DESIRED_AUTO);
         status.boot_auto_connect_waiting=1;
@@ -745,6 +756,10 @@ OSStatus wifi_manager_apply_boot_settings(void)
         desired_revision++;
     }
     unlock_status();
+    if (config.ap_disable_after_sta_connected) {
+        openm1_log_warn("WIFI","saved AP auto-close ignored on kernel .023; Recovery AP remains on");
+        wifi_manager_history_note(WIFI_HISTORY_AP_CLOSE_SUPPRESSED);
+    }
     if (config.wifi_auto_connect && config.wifi_ssid[0]) {
         openm1_log_info("WIFI","auto-connect desired SSID=%s",config.wifi_ssid);
         openm1_log_info("WIFI","rescue window %u ms",WIFI_BOOT_AUTO_CONNECT_GRACE_MS);
@@ -777,15 +792,15 @@ int wifi_manager_save_settings(const char *body,size_t length)
     config_store_get(&config);
     result=wifi_settings_apply_json(body,length,&config);
     if (result) { memset(config.wifi_password,0,sizeof(config.wifi_password)); return result; }
-    if (!control_worker_created && config.ap_disable_after_sta_connected) {
-        memset(config.wifi_password,0,sizeof(config.wifi_password)); return -4;
-    }
+    /* Migrate the legacy bit only when the user is already saving settings. */
+    config.ap_disable_after_sta_connected=0;
     err=config_store_save(&config);
     if (err==kNoErr) {
         lock_status();
         snprintf(policy.saved_ssid,sizeof(policy.saved_ssid),"%s",config.wifi_ssid);
         policy.auto_connect=config.wifi_auto_connect;
-        policy.disable_ap_after_connect=config.ap_disable_after_sta_connected;
+        policy.saved_ap_close_requested=0;
+        policy.disable_ap_after_connect=0;
         if (desired_station.source==WIFI_DESIRED_AUTO) {
             if (!config.wifi_auto_connect || !config.wifi_ssid[0]) {
                 wifi_station_drop_auto_desired(&desired_station);
@@ -864,7 +879,8 @@ static const char *history_reason_name(uint8_t reason)
         "pwm_applied_changed","wlan_fatal","connect_failed",
         "manual_disconnect","first_station_arm","explicit_network_switch",
         "station_up_event","station_down_event","ap_missing_confirmed",
-        "ap_restore_failed"
+        "ap_restore_failed","ap_auto_close_suppressed",
+        "ap_close_attempt","ap_close_failed"
     };
     return reason<sizeof(names)/sizeof(names[0])?names[reason]:"unknown";
 }
@@ -989,14 +1005,15 @@ void wifi_manager_status_json(char *out,size_t out_size)
     json_string(saved_ssid,sizeof(saved_ssid),saved.saved_ssid);
     json_string(message,sizeof(message),snapshot.message);
     snprintf(out,out_size,
-      "{\"recovery_ap\":%s,\"recovery_ap_state\":\"%s\",\"recovery_ssid\":\"%s\",\"mac\":\"%s\",\"dhcp_hostname\":\"%s\",\"sta_state\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"gateway\":\"%s\",\"netmask\":\"%s\",\"dns\":\"%s\",\"rssi\":%d,\"message\":\"%s\",\"sta_connect_supported\":true,\"scan_supported\":%s,\"auto_connect\":%s,\"ap_disable_after_connect\":%s,\"saved_ssid\":\"%s\","
+      "{\"recovery_ap\":%s,\"recovery_ap_state\":\"%s\",\"recovery_ssid\":\"%s\",\"mac\":\"%s\",\"dhcp_hostname\":\"%s\",\"sta_state\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"gateway\":\"%s\",\"netmask\":\"%s\",\"dns\":\"%s\",\"rssi\":%d,\"message\":\"%s\",\"sta_connect_supported\":true,\"scan_supported\":%s,\"auto_connect\":%s,\"ap_disable_after_connect\":%s,\"ap_auto_close_supported\":false,\"legacy_saved_ap_close_requested\":%s,\"saved_ssid\":\"%s\","
       "\"wifi_control_worker_running\":%s,\"wifi_control_loop_count\":%lu,\"last_wifi_control_tick_ms\":%lu,\"want_connected\":%s,\"desired_source\":\"%s\",\"manual_disconnect_latched\":%s,\"link_cached\":%s,\"ip_valid_cached\":%s,\"link_uptime_ms\":%lu,\"disconnect_count\":%lu,\"last_disconnect_ms\":%lu,\"last_connect_ms\":%lu,\"consecutive_bad_samples\":%lu,\"consecutive_good_samples\":%lu,"
       "\"station_phase\":\"%s\",\"station_armed\":%s,\"station_started_once\":%s,\"native_retry_interval_ms\":%u,\"native_reconnect_waiting\":%s,\"native_reconnect_since_ms\":%lu,\"native_reconnect_successes\":%lu,\"last_native_reconnect_success_ms\":%lu,\"station_rearm_count\":%lu,\"last_station_rearm_ms\":%lu,\"last_wlan_operation\":\"%s\",\"last_wlan_error\":%d,\"boot_auto_connect_grace_ms\":%u,\"boot_auto_connect_waiting\":%s,"
       "\"boot_auto_connect_remaining_ms\":%lu,\"ap_probe_failures\":%lu,\"ap_probe_interval_ms\":%u,\"ap_missing_threshold\":%u,\"recovery_ap_observed\":%s,\"recovery_ap_policy_closed\":%s,\"recovery_ap_restore_count\":%lu,\"recovery_ap_last_probe_ms\":%lu,\"recovery_ap_last_restore_ms\":%lu,\"recovery_ap_last_error\":%d,\"ap_boot_failsafe_ms\":%u,\"ap_stable_before_close_ms\":%u,\"wifi_connect_fail_count\":%lu,\"last_wifi_connect_fail_error\":%d,\"wifi_fatal_error_count\":%lu,\"last_wifi_event\":\"%s\",\"last_wifi_event_code\":%d}",
       snapshot.recovery_ap_observed_on?"true":"false",ap_state,recovery_ssid(),recovery_mac(),recovery_hostname(),snapshot.state,ssid,
       snapshot.ip,snapshot.gateway,snapshot.netmask,snapshot.dns,snapshot.rssi,message,
       scan_supported?"true":"false",saved.auto_connect?"true":"false",
-      saved.disable_ap_after_connect?"true":"false",saved_ssid,
+      saved.disable_ap_after_connect?"true":"false",
+      saved.saved_ap_close_requested?"true":"false",saved_ssid,
       snapshot.wifi_control_worker_running?"true":"false",(unsigned long)snapshot.wifi_control_loop_count,
       (unsigned long)snapshot.last_wifi_control_tick_ms,want?"true":"false",
       source==WIFI_DESIRED_MANUAL?"manual":source==WIFI_DESIRED_AUTO?"auto":"none",latch?"true":"false",

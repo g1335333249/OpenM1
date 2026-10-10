@@ -1,4 +1,4 @@
-# OpenM1 v0.6.14
+# OpenM1 v0.6.15
 
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
@@ -30,7 +30,11 @@ v0.6.13 增加实体按钮长按诊断和**默认开启的模拟恢复**。真�
 
 v0.6.14 增加手动 IPv6 能力诊断与最近 32 次 Wi-Fi 状态变化历史。固定 SDK 声明 `AF_INET6`、`inet_pton()`、`getaddrinfo()`，并通过 MX1290 MOC lwIP API 表转发 Socket 操作；当前工具链可链接这些调用，但 MOC 接口表没有专用 `micoWlanGetIP6Status()`，**实际 Kernel IPv6 能力和设备是否获分配 IPv6 地址尚未在 M1 上确认**。诊断页仅在用户点击后检测 IPv6 Socket、数值地址解析和固定域名的 AAAA DNS；失败返回底层错误，DNS 失败单独标记为不确定。此测试不连接 IPv6 服务器、不启用 IPv6 MQTT，原 MQTT IPv4 路径保持不变。检测临时线程只在手动请求时创建，要求 Station 已有 IP、OTA 未忙且堆留有 OTA 安全余量。
 
-周期性 Wi-Fi 图标闪烁目前缺少实机同步证据，**不能确认是真实掉线或状态误判**。代码检查表明 `NETWORK_NO_INTERNET` 目标是 Wi-Fi 常亮加红 X；闪烁目标来自 `NETWORK_NO_WIFI`、Station 被判 LOST，或用户主动的显示测试。Station 当前连续 3 次 bad sample 判丢失，而 bad sample 可能是实际 Link 断开、Link 查询错误、IP 查询错误或 IP 无效。新 `/api/wifi/history` 只在事件和状态变化时记录原始 Link/IP 查询结果、RSSI、事件码、断线/重连/AP 恢复计数、网络健康与显示目标及实际 PWM 目标；不会每秒写历史或写 Flash。诊断页可手动刷新、复制和导出 JSON。实机需在图标闪烁前后导出历史，对照路由器在线状态，再决定是否调整 WLAN 去抖或 AP 恢复策略。当前版本不改变已验证的 Station 恢复阈值和 PWM5/PWM4 映射。
+v0.6.14 开发时，周期性 Wi-Fi 图标闪烁尚缺实机同步证据，不能确认是真实掉线或状态误判。代码检查表明 `NETWORK_NO_INTERNET` 目标是 Wi-Fi 常亮加红 X；闪烁目标来自 `NETWORK_NO_WIFI`、Station 被判 LOST，或用户主动的显示测试。Station 当前连续 3 次 bad sample 判丢失，而 bad sample 可能是实际 Link 断开、Link 查询错误、IP 查询错误或 IP 无效。新 `/api/wifi/history` 只在事件和状态变化时记录原始 Link/IP 查询结果、RSSI、事件码、断线/重连/AP 恢复计数、网络健康与显示目标及实际 PWM 目标；不会每秒写历史或写 Flash。诊断页可手动刷新、复制和导出 JSON。随后实机历史确认真实 Station 事件；v0.6.15 据此停用当前 Kernel 的自动关 AP 路径，Station 恢复阈值和 PWM5/PWM4 映射不变。
+
+v0.6.15 根据真实 M1 的历史记录修正 Recovery AP 策略：配置为“连接成功后关闭 Recovery AP”时，Station 在连接后约 32 秒出现真实 `station_down_event`、`station_lost`，随后 MiCO 原生重连；取消该配置后周期性闪烁停止。时间点与 `micoWlanSuspendSoftAP()` 路径高度吻合，但固定 Kernel 的底层冲突机制仍未被直接证明。在 3080B002.023 上现禁用自动关 AP，正常运行不编译该 HAL 调用；已保存的旧开关在 RAM 中被忽略，升级时不写 Flash，用户下次主动保存 Wi-Fi 设置才清除旧标志。Recovery AP 真实状态探测、自愈和 Station 原生重连保持。历史中新增 `ap_auto_close_suppressed`，状态 API 报告支持状态和旧标志。需实机长时间确认 Station 不再周期性掉线及 AP 自愈正常。
+
+Recovery AP 会持续开放，当前热点无密码且 HTTP 管理接口无认证；同一网络上的其他客户端可能访问配置、OTA 等管理操作。后续应单独设计并实测每设备唯一的热点密码、安全配网/恢复方式，以及管理接口认证、会话和 CSRF 防护；本版不更改未经验证的无线安全参数。
 
 `main()` 创建 3072 字节 housekeeping 线程后返回，由固定 MOC `pre_main()` 删除当前 4096 字节 app_thread，永久线程栈净减少约 1024 字节。housekeeping 只负责低频心跳、内存采样和可选服务懒启动，不调用 WLAN HAL。
 
@@ -44,7 +48,7 @@ v0.6.14 增加手动 IPv6 能力诊断与最近 32 次 Wi-Fi 状态变化历史�
 
 「API 调试」提供固定同源路由目录，包含中文说明、方法/类型筛选、`/api/logs` 的 after 序号、POST JSON 编辑与语法校验。请求只由点击执行发出，一次只执行一个；结果显示 HTTP 状态、耗时、完成时间和 Content-Type，JSON 缩进，非 JSON 原文保留。复制优先用 Clipboard API，普通 HTTP 页面会退回 textarea 复制；结果文本始终可手动选中。调试台不会保存编辑框中的 Wi-Fi 或 MQTT 密码，也不会自动批量调用接口。修改配置、断网、清空日志、切换波特率、擦除 OTA_TEMP 及重启需要确认。OTA 上传仍须在「固件升级」页选择文件并完成准备、上传、Flash 回读和校验。
 
-RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.14-log.txt`，系统页“复制日志”使用同一完整文本流；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
+RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.15-log.txt`，系统页“复制日志”使用同一完整文本流；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
 
 | 路由 | 功能 |
 | --- | --- |
@@ -87,7 +91,7 @@ SSID 限制为 31 字节加字符串结束符，密码限制为 63 字节加结�
 
 ### AP+STA 源码依据与待测风险
 
-固定 SDK 的 `include/mico_wlan.h` 在 `micoWlanStart()` 注释中说明建立 Station+SoftAP 共存时调用两次。`platform/MCU/MX1290/moc/moc_api.c` 将 `StartNetwork()` 转发至 MOC 的 `micoWlanStart`。原有 SoftAP 启动和手动 STA 调用顺序保持不变；用户已在真实 M1 上验证 AP+STA 可工作。新开机策略先启动 Recovery，再读取配置并复用现有 STA 连接路径。仅在自动连接已启用、已保存 SSID 与当前 STA 一致、开机至少 120 秒、Station 链路和 IP 连续稳定至少 30 秒、没有 OTA，且关闭前再次确认链路与 IP 有效时，才通过 `micoWlanSuspendSoftAP()` 关闭 AP；STA 失联或策略关闭后，后台检查会用相同 SSID/IP/DHCP 配置重新启动 Recovery AP。此策略仍待实机验证。
+固定 SDK 的 `include/mico_wlan.h` 在 `micoWlanStart()` 注释中说明建立 Station+SoftAP 共存时调用两次。`platform/MCU/MX1290/moc/moc_api.c` 将 `StartNetwork()` 转发至 MOC 的 `micoWlanStart`。原有 SoftAP 启动和手动 STA 调用顺序保持不变；用户已在真实 M1 上验证 AP+STA 可工作。新开机策略先启动 Recovery，再读取配置并复用现有 STA 连接路径。此前在满足稳定期时尝试通过 `micoWlanSuspendSoftAP()` 关闭 AP，实机发现该时序附近 Station 真实掉线。v0.6.15 在当前固定 Kernel 上停止自动关闭 AP；STA 失联或 AP 丢失时，后台继续用相同 SSID/IP/DHCP 配置恢复 Recovery AP。具体 HAL 交互机制仍待专门实机验证。
 
 普通 `ScanResult` 只有 SSID/RSSI；本版用固定 SDK 的 `micoWlanStartScanAdv()` 和 `mico_notify_WIFI_SCAN_ADV_COMPLETED`，取得 `ScanResult_adv` 的信道及安全类型。扫描由唯一 Wi-Fi 控制线程发起，回调只保存最多 20 个 AP，同 SSID 留最强记录，按 RSSI 排序；15 秒未回调则标记失败。不调用完整 `mico_system_init()`，也不主动停止恢复热点。**扫描期间热点和 HTTP 是否持续可用必须实机核对；失败时仍可手工输入 SSID。**
 
@@ -123,7 +127,7 @@ Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置
 
 完整 MOC OTA 由 Kernel、填充到 `0x75000`、8 字节 APP 头、APP payload、末尾 16 字节 raw MD5 组成。上传或 URL 下载时使用 2048 字节静态缓冲流式写入 `MICO_PARTITION_OTA_TEMP`，然后从 Flash 回读长度、两份 APP CRC、payload CRC 和整个 OTA（不含尾部 MD5）的 MD5；另外计算 boot table 所需 CRC16。验证成功才调用 `mico_ota_switch_to_new_fw(total_size - 16, boot_crc16)`，发送 HTTP 成功响应，等待两秒后 `MicoSystemReboot()`。任一校验失败不写升级标志、不重启。最大 OTA 文件限制为分区实际长度与 `0xB5000` 两者较小值。
 
-`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.14 的本地 OTA、长期 Station 与 MQTT 稳定性已通过实机验证。**
+`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.15 的本地 OTA、长期 Station 与 MQTT 稳定性已通过实机验证。**
 
 ## 构建与验证
 
@@ -141,9 +145,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.6.14@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.6.15@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.6.14.bin
+  --app dist/OpenM1-v0.6.15.bin
 ```
 
-GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.14`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.14 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
+GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.15`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.15 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
