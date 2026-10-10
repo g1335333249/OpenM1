@@ -30,6 +30,6 @@ assert "document.execCommand('copy')" in page
 assert "const tabIds=['overview','network','mqtt','homeassistant','update','diagnostics','api','system']" in page
 assert "else if(activeTab==='api')" not in page
 assert 'localStorage' not in catalog
-assert 'OpenM1 v0.6.16' in Path('openm1/homeassistant.c').read_text()
+assert 'OpenM1 v0.6.17' in Path('openm1/homeassistant.c').read_text()
 assert 'homeassistant_entity_count\':5' in Path('tools/generate_manifest.py').read_text()
 print('API_CONSOLE_STATIC_PASS: 19 GET + 21 POST match firmware router')

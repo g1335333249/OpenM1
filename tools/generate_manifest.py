@@ -32,7 +32,7 @@ symbols_valid = all(f'PASS {symbol}' in header for symbol in ('user_handler','mo
 sdk_valid = Path('mico-os').is_dir() and __import__('subprocess').check_output(['git','-C','mico-os','rev-parse','HEAD'], text=True).strip() == SDK_COMMIT
 kernel = require_sdk_kernel(a.sdk_kernel)
 valid = all(checks.values()) and header_valid and symbols_valid and sdk_valid and stack_match and '5.4.1' in a.toolchain
-data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.16','board':'MK3080B','sdk_commit':SDK_COMMIT,
+data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.17','board':'MK3080B','sdk_commit':SDK_COMMIT,
         'kernel':'3080B002.023','kernel_version':'3080B002.023','sdk_kernel_version':'3080B002.023',
         'kernel_source':'mico-os/resources/moc_kernel/3080B/kernel.bin',
         'kernel_sha256':hashlib.sha256(kernel).hexdigest(),'interface_version':3,
@@ -111,6 +111,8 @@ data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.16','board':'MK3080B'
         'ipv6_manual_capability_probe':True,'ipv6_runtime_verified_on_hardware':False,
         'mqtt_ipv6_enabled':False,'ipv6_tcp_manual_probe':True,'ipv6_tcp_hardware_verified':False,
         'ipv6_tcp_experimental_build_guard':True,'ipv6_tcp_requires_web_confirmation':True,
+        'ipv6_kernel_getaddrinfo_enabled':False,'ipv6_aaaa_over_ipv4_udp':True,
+        'ipv6_dns_per_server_timeout_ms':3000,'ipv6_staged_status':True,
         'physical_button_long_press_type':'0x04',
         'physical_button_long_press_payload_zero_required':True,
         'factory_reset_double_long_press':True,

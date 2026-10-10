@@ -38,7 +38,7 @@ assert "s.state==='no_wifi'?'闪烁':'常亮'" in page
 
 assert 'AF_INET6' in ipv6 and 'inet_pton(family,input,address)' in ipv6
 assert 'IPV6_PRIMARY_DNS' in ipv6
-assert 'api->lwip_socket' in ipv6 and 'api->lwip_getaddrinfo' in ipv6
+assert 'api->lwip_socket' in ipv6 and 'api->lwip_sendto' in ipv6
 assert 'if (recovery_ota_busy()) return -2;' in ipv6
 assert 'if (!wifi_manager_station_ready()) return -3;' in ipv6
 assert 'IPV6_DIAGNOSTIC_WORKER_STACK+9216u+8192u' in ipv6

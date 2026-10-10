@@ -1130,3 +1130,11 @@ void wifi_manager_station_ip(char out[16])
     else out[0]=0;
     unlock_status();
 }
+void wifi_manager_station_dns(char out[16])
+{
+    if (!out) return;
+    lock_status();
+    if (status.ip_valid_cached) copy_ip(out,status.dns);
+    else out[0]=0;
+    unlock_status();
+}
