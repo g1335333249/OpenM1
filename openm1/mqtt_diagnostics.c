@@ -7,6 +7,8 @@ const char *mqtt_failure_stage_name(mqtt_failure_stage_t stage)
     case MQTT_STAGE_DNS: return "dns";
     case MQTT_STAGE_TCP_SOCKET: return "tcp_socket";
     case MQTT_STAGE_TCP_CONNECT: return "tcp_connect";
+    case MQTT_STAGE_PROXY: return "proxy";
+    case MQTT_STAGE_DIRECT_IPV6: return "direct_ipv6_unsupported";
     case MQTT_STAGE_MQTT_CONNECT: return "mqtt_connect";
     case MQTT_STAGE_SUBSCRIBE: return "subscribe";
     case MQTT_STAGE_AVAILABILITY_PUBLISH: return "availability_publish";

@@ -1,8 +1,8 @@
-name: Build OpenM1 v0.6.18
+name: Build OpenM1 v0.6.20
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, release/v0.6.20-stable]
 permissions:
   contents: read
 jobs:
@@ -28,6 +28,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OpenM1-v0.6.18
+          name: OpenM1-v0.6.20
           path: dist/
           if-no-files-found: error

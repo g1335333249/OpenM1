@@ -13,6 +13,8 @@
 #include "MQTTClient.h"
 #include "mqtt_bounded_read.h"
 #include "mqtt_diagnostics.h"
+#include "mqtt_proxy.h"
+#include "socks5_protocol.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,9 +33,26 @@ typedef struct {
     int last_error_code,last_socket_read_result,last_socket_error,last_socket_write_result;
     int last_subscribe_result,brightness_control_subscribed;
     int connected,ha_active;
+    mqtt_proxy_stage_t proxy_last_error_stage;
+    int proxy_error;
+    uint8_t proxy_state,proxy_authenticated,proxy_target_connected;
 } mqtt_status_t;
+enum {PROXY_STATE_IDLE,PROXY_STATE_DISABLED,PROXY_STATE_CONNECTED,
+      PROXY_STATE_DISCONNECTED,PROXY_STATE_ERROR};
+static const char *proxy_state_name(const mqtt_status_t *snapshot)
+{
+    switch (snapshot->proxy_state) {
+    case PROXY_STATE_DISABLED:return "disabled";
+    case PROXY_STATE_CONNECTED:return "connected";
+    case PROXY_STATE_DISCONNECTED:return "disconnected";
+    case PROXY_STATE_ERROR:return mqtt_proxy_stage_name(snapshot->proxy_last_error_stage);
+    default:return "idle";
+    }
+}
 static mqtt_status_t status={{0}};
 static mico_mutex_t status_mutex;
+/* Configuration endpoints run on the single Recovery HTTP thread. */
+static json_min_field_t mqtt_config_fields[12];
 static mico_thread_t worker_thread;
 static int manager_ready;
 static int worker_created,worker_creation_pending;
@@ -142,6 +161,7 @@ static void record_disconnect(void)
     status.last_disconnect_ms=now;
     status.last_connected_duration_ms=now-status.connected_since_ms;
     status.connected_since_ms=0;
+    if (status.proxy_state==PROXY_STATE_CONNECTED) status.proxy_state=PROXY_STATE_DISCONNECTED;
     mico_rtos_unlock_mutex(&status_mutex);
 }
 
@@ -185,6 +205,10 @@ static int valid_host(const char *value)
 {
     size_t i,n=strlen(value);
     if (n>=129) return 0;
+    if (strchr(value,':')) {
+        uint8_t address[16];
+        return socks5_ipv6_parse(value,address)==0;
+    }
     for (i=0;i<n;i++) {
         char c=value[i];
         if (!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='.'||c=='-')) return 0;
@@ -213,7 +237,7 @@ static int parse_integer(const json_min_field_t *field,unsigned min,unsigned max
 int mqtt_manager_configure(const char *body,size_t length)
 {
     /* Called only by the single-client HTTP thread; avoid a ~2 KiB frame. */
-    static json_min_field_t fields[12];
+    json_min_field_t *fields=mqtt_config_fields;
     openm1_config_t next;
     int count,i,clear_password=0;
     unsigned number;
@@ -286,6 +310,8 @@ static int network_open(Network *network,const openm1_config_t *config,mqtt_fail
 {
     struct hostent *host;
     struct sockaddr_in address;
+    mqtt_proxy_stage_t proxy_stage;
+    int proxy_error=0,authenticated=0,target_connected=0;
     memset(network,0,sizeof(*network));
     network->my_socket=-1;
     openm1_mqtt_read_reset(&mqtt_read_state);
@@ -293,6 +319,37 @@ static int network_open(Network *network,const openm1_config_t *config,mqtt_fail
     status.last_socket_read_result=0;
     status.last_socket_write_result=0;
     mico_rtos_unlock_mutex(&status_mutex);
+    if (config->proxy_enabled) {
+        if (mqtt_proxy_open(config,&network->my_socket,&proxy_stage,&proxy_error,
+                            &authenticated,&target_connected)) {
+            *failure_stage=MQTT_STAGE_PROXY;
+            mico_rtos_lock_mutex(&status_mutex);
+            status.proxy_state=PROXY_STATE_ERROR;
+            status.proxy_last_error_stage=proxy_stage;
+            status.proxy_error=proxy_error;
+            status.proxy_authenticated=authenticated;
+            status.proxy_target_connected=target_connected;
+            mico_rtos_unlock_mutex(&status_mutex);
+            return -1;
+        }
+        mico_rtos_lock_mutex(&status_mutex);
+        status.proxy_state=PROXY_STATE_CONNECTED;
+        status.proxy_error=0;
+        status.proxy_authenticated=authenticated;
+        status.proxy_target_connected=target_connected;
+        mico_rtos_unlock_mutex(&status_mutex);
+        goto ready;
+    }
+    mico_rtos_lock_mutex(&status_mutex);
+    status.proxy_state=PROXY_STATE_DISABLED;
+    status.proxy_error=0;
+    status.proxy_authenticated=0;
+    status.proxy_target_connected=0;
+    mico_rtos_unlock_mutex(&status_mutex);
+    if (strchr(config->host,':')) {
+        *failure_stage=MQTT_STAGE_DIRECT_IPV6;
+        return -1;
+    }
     host=gethostbyname(config->host);
     if (!host || !host->h_addr_list || !host->h_addr_list[0]) {
         *failure_stage=MQTT_STAGE_DNS;return -1;
@@ -307,6 +364,7 @@ static int network_open(Network *network,const openm1_config_t *config,mqtt_fail
         *failure_stage=MQTT_STAGE_TCP_CONNECT;
         close(network->my_socket); network->my_socket=-1;return -1;
     }
+ready:
     network->mqttread=openm1_mqtt_read;
     network->mqttwrite=openm1_mqtt_write;
     network->disconnect=MICO_disconnect;
@@ -350,7 +408,10 @@ static int connection_changed(const openm1_config_t *a,const openm1_config_t *b)
 {
     return strcmp(a->host,b->host)||a->port!=b->port||strcmp(a->username,b->username)||
            strcmp(a->password,b->password)||strcmp(a->client_id,b->client_id)||
-           strcmp(a->base_topic,b->base_topic)||strcmp(a->discovery_prefix,b->discovery_prefix);
+           strcmp(a->base_topic,b->base_topic)||strcmp(a->discovery_prefix,b->discovery_prefix)||
+           a->proxy_enabled!=b->proxy_enabled || a->proxy_port!=b->proxy_port ||
+           strcmp(a->proxy_host,b->proxy_host)||strcmp(a->proxy_username,b->proxy_username)||
+           strcmp(a->proxy_password,b->proxy_password);
 }
 static void mqtt_worker(mico_thread_arg_t arg)
 {
@@ -508,6 +569,7 @@ close_network:
         brightness_command.pending=0;brightness_command.invalid=0;
         mico_rtos_lock_mutex(&status_mutex);
         status.brightness_control_subscribed=0;
+        if (status.proxy_state==PROXY_STATE_CONNECTED) status.proxy_state=PROXY_STATE_DISCONNECTED;
         mico_rtos_unlock_mutex(&status_mutex);
         if (connected) {
             record_disconnect();
@@ -614,6 +676,93 @@ static void json_escape(char *out,size_t cap,const char *in)
         else if (c>=32) out[n++]=c;
     }
     out[n]=0;
+}
+int mqtt_manager_proxy_configure(const char *body,size_t length)
+{
+    json_min_field_t *fields=mqtt_config_fields;
+    openm1_config_t config;
+    unsigned port;
+    int count,i,clear=0;
+    if (!manager_ready || !body || length>512) return -1;
+    count=json_min_parse(body,length,fields,7);
+    if (count<0) return -1;
+    config_store_get(&config);
+    for (i=0;i<count;i++) {
+        const json_min_field_t *f=&fields[i];
+        if (!strcmp(f->key,"enabled")) {
+            if (f->kind!='b') return -1;
+            config.proxy_enabled=!strcmp(f->value,"true");
+        } else if (!strcmp(f->key,"host")) {
+            if (copy_string(config.proxy_host,sizeof(config.proxy_host),f)) return -1;
+        } else if (!strcmp(f->key,"port")) {
+            if (parse_integer(f,1,65535,&port)) return -1;
+            config.proxy_port=(uint16_t)port;
+        } else if (!strcmp(f->key,"username")) {
+            if (copy_string(config.proxy_username,sizeof(config.proxy_username),f)) return -1;
+        } else if (!strcmp(f->key,"password")) {
+            if (copy_string(config.proxy_password,sizeof(config.proxy_password),f)) return -1;
+        } else if (!strcmp(f->key,"clear_password")) {
+            if (f->kind!='b') return -1;
+            clear=!strcmp(f->value,"true");
+        } else return -1;
+    }
+    if (clear) config.proxy_password[0]=0;
+    if (config.proxy_enabled && (!config.proxy_host[0] ||
+        (config.proxy_username[0] && !config.proxy_password[0]))) return -1;
+    if (config.proxy_password[0] && !config.proxy_username[0]) return -1;
+    if (config.proxy_host[0] && (!valid_host(config.proxy_host) || strchr(config.proxy_host,':'))) return -1;
+    return config_store_save(&config)==kNoErr?0:-2;
+}
+void mqtt_manager_proxy_status_json(char *out,size_t capacity)
+{
+    openm1_config_t config;
+    mqtt_status_t snapshot;
+    char host[130],username[70];
+    config_store_get(&config);
+    memset(&snapshot,0,sizeof(snapshot));
+    if (manager_ready) {mico_rtos_lock_mutex(&status_mutex);snapshot=status;mico_rtos_unlock_mutex(&status_mutex);}
+    json_escape(host,sizeof(host),config.proxy_host);
+    json_escape(username,sizeof(username),config.proxy_username);
+    snprintf(out,capacity,"{\"enabled\":%s,\"mode\":\"%s\",\"type\":\"SOCKS5\","
+        "\"host\":\"%s\",\"port\":%u,\"username\":\"%s\",\"password_set\":%s,"
+        "\"state\":\"%s\",\"authenticated\":%s,\"target_connected\":%s,"
+        "\"last_error_stage\":\"%s\",\"last_error_code\":%d,\"mqtt_connected\":%s,\"reconnect_count\":%lu}",
+        config.proxy_enabled?"true":"false",config.proxy_enabled?"socks5":"direct",
+        host,config.proxy_port,username,config.proxy_password[0]?"true":"false",
+        proxy_state_name(&snapshot),
+        snapshot.proxy_authenticated?"true":"false",snapshot.proxy_target_connected?"true":"false",
+        mqtt_proxy_stage_name(snapshot.proxy_last_error_stage),
+        snapshot.proxy_error,snapshot.connected?"true":"false",
+        (unsigned long)snapshot.disconnect_count);
+}
+int mqtt_manager_proxy_test(char *out,size_t capacity)
+{
+    openm1_config_t config;
+    mqtt_proxy_stage_t stage=PROXY_STAGE_NONE;
+    int fd=-1,error=0,authenticated=0,target_connected=0,result;
+    uint8_t proxy_address_request[10];
+    size_t proxy_request_length=0;
+    int connecting=0;
+    if (!manager_ready || recovery_ota_busy() || !wifi_manager_station_ready() ||
+        system_stats_low_memory_safe_mode()) return -2;
+    mico_rtos_lock_mutex(&status_mutex);
+    connecting=!strcmp(status.state,"connecting");
+    mico_rtos_unlock_mutex(&status_mutex);
+    if (connecting) return -2;
+    config_store_get(&config);
+    if (!config.proxy_enabled || !config.host[0]) return -1;
+    /* The single-client HTTP route cannot cancel MOC gethostbyname(). Only
+     * allow an IPv4 literal here; normal MQTT proxy mode may use a name. */
+    if (socks5_connect_request(config.proxy_host,config.proxy_port,
+            proxy_address_request,sizeof(proxy_address_request),&proxy_request_length) ||
+        proxy_address_request[3]!=1) return -3;
+    result=mqtt_proxy_open(&config,&fd,&stage,&error,&authenticated,&target_connected);
+    if (fd>=0) close(fd);
+    snprintf(out,capacity,"{\"ok\":%s,\"stage\":\"%s\",\"error_code\":%d,"
+        "\"authenticated\":%s,\"target_connected\":%s}",
+        result==0?"true":"false",mqtt_proxy_stage_name(stage),error,
+        authenticated?"true":"false",target_connected?"true":"false");
+    return result;
 }
 void mqtt_manager_status_json(char *out,size_t capacity)
 {

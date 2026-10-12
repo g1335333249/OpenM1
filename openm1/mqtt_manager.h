@@ -10,5 +10,8 @@ int mqtt_manager_configure(const char *body,size_t length);
 int mqtt_manager_start(void);
 int mqtt_manager_stop(void);
 int mqtt_manager_set_discovery(int enabled);
+int mqtt_manager_proxy_configure(const char *body,size_t length);
+void mqtt_manager_proxy_status_json(char *out,size_t capacity);
+int mqtt_manager_proxy_test(char *out,size_t capacity);
 void mqtt_manager_status_json(char *out,size_t capacity);
 void homeassistant_status_json(char *out,size_t capacity);

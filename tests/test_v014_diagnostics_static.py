@@ -52,5 +52,5 @@ assert 'AF_INET6' not in mqtt
 assert '#define WIFI_BOOT_AUTO_CONNECT_GRACE_MS 60000u' in (root / 'wifi_station_logic.h').read_text()
 assert 'WIFI_NATIVE_RETRY_INTERVAL_MS' in wifi and 'wifi_retry_interval=WIFI_NATIVE_RETRY_INTERVAL_MS' in wifi
 assert 'OPENM1_FACTORY_RESET_DRY_RUN 1' in (root / 'button_manager.h').read_text()
-assert 'OPENM1_CONFIG_VERSION 3' in (root / 'config_store.h').read_text()
+assert 'OPENM1_CONFIG_VERSION 4' in (root / 'config_store.h').read_text()
 print('V014_DIAGNOSTICS_STATIC_PASS: 32-entry transitions, manual IPv6, IPv4 MQTT, WLAN/OTA guard')

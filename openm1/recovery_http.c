@@ -18,6 +18,8 @@
 #include <strings.h>
 
 static mico_thread_t server_thread;
+/* Both MQTT configuration routes execute on this one HTTP server thread. */
+static char mqtt_config_body[1025];
 static volatile int http_listening;
 int recovery_http_ready(void) { return http_listening; }
 int recovery_send_all(int fd, const void *data, size_t len)
@@ -167,7 +169,7 @@ static int read_small_body(int fd,const char *request,int start,size_t initial,
 static void send_log_download(int fd)
 {
     static const char header[]="HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
-        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.18-log.txt\"\r\n"
+        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.20-log.txt\"\r\n"
         "Connection: close\r\nCache-Control: no-store\r\n\r\n";
     openm1_log_status_t status;
     openm1_log_record_t record;
@@ -176,7 +178,7 @@ static void send_log_download(int fd)
     int n;
     openm1_log_status(&status);
     if (recovery_send_all(fd,header,sizeof(header)-1u)) return;
-    n=snprintf(line,sizeof(line),"OpenM1 v0.6.18\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
+    n=snprintf(line,sizeof(line),"OpenM1 v0.6.20\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
                recovery_hostname(),(unsigned long)mico_rtos_get_time());
     if (n>0 && n<(int)sizeof(line) && recovery_send_all(fd,line,(size_t)n)) return;
     if (!status.available) {
@@ -302,6 +304,8 @@ static void handle_client(int fd)
             system_stats_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/mqtt/status")) {
             mqtt_manager_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/mqtt/proxy/status")) {
+            mqtt_manager_proxy_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/homeassistant/status")) {
             homeassistant_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/display/status")) {
@@ -310,7 +314,7 @@ static void handle_client(int fd)
             network_health_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.18\",\"version\":\"0.6.18\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.20\",\"version\":\"0.6.20\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),recovery_hostname(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -420,17 +424,38 @@ static void handle_client(int fd)
         goto done;
     }
     if (!strcmp(path,"/api/mqtt/config")) {
-        static char body[1025];
         int result;
-        if (!seen || !read_small_body(fd,request,body_start,body_len,length,body,sizeof(body))) {
+        if (!seen || !read_small_body(fd,request,body_start,body_len,length,mqtt_config_body,sizeof(mqtt_config_body))) {
             recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"MQTT 配置请求无效。\"}");goto done;
         }
-        result=mqtt_manager_configure(body,length);
-        memset(body,0,sizeof(body));
+        result=mqtt_manager_configure(mqtt_config_body,length);
+        memset(mqtt_config_body,0,sizeof(mqtt_config_body));
         if (result==0) recovery_send_json(fd,200,"{\"ok\":true,\"message\":\"MQTT 配置已保存。\"}");
         else if (result==-2) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"请先关闭 Home Assistant 自动发现，再修改主题或发现前缀。\"}");
         else if (result==-3) recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"配置保存失败或正在升级固件。\"}");
         else recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"MQTT 配置字段或长度无效。\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/mqtt/proxy/config")) {
+        int result;
+        if (!seen || length>512 || !read_small_body(fd,request,body_start,body_len,length,mqtt_config_body,sizeof(mqtt_config_body))) {
+            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"代理配置请求无效。\"}");goto done;
+        }
+        result=mqtt_manager_proxy_configure(mqtt_config_body,length);
+        memset(mqtt_config_body,0,sizeof(mqtt_config_body));
+        if (!result) recovery_send_json(fd,200,"{\"ok\":true}");
+        else recovery_send_json(fd,result==-2?503:400,"{\"ok\":false,\"message\":\"代理配置无效或保存失败。\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/mqtt/proxy/test")) {
+        int result;
+        if ((seen && length) || body_len) {recovery_send_json(fd,400,"{\"ok\":false}");goto done;}
+        json[0]=0;
+        result=mqtt_manager_proxy_test(json,sizeof(json));
+        if (result==-2) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"网络、内存或 OTA 状态不允许测试。\"}");
+        else if (result==-3) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"单客户端 HTTP 安全测试只接受代理 IPv4 地址；域名可能阻塞 Kernel DNS。\"}");
+        else if (result==-1 && !json[0]) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"请先启用代理并配置 Broker。\"}");
+        else recovery_send_json(fd,200,json);
         goto done;
     }
     if (!strcmp(path,"/api/mqtt/start") || !strcmp(path,"/api/mqtt/test")) {

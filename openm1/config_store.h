@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #define OPENM1_CONFIG_MAGIC 0x314d504fu
-#define OPENM1_CONFIG_VERSION 3u
+#define OPENM1_CONFIG_VERSION 4u
 typedef struct {
     uint32_t magic;
     uint16_t version;
@@ -28,6 +28,14 @@ typedef struct {
     uint8_t wifi_auto_connect;
     uint8_t ap_disable_after_sta_connected;
     uint8_t wifi_reserved[2];
+    uint8_t proxy_enabled;
+    uint8_t proxy_reserved;
+    uint16_t proxy_port;
+    char proxy_host[64];
+    char proxy_username[32];
+    char proxy_password[64];
+    /* Layout compatibility only. Former v0.6.19 AP credential is never used. */
+    uint8_t legacy_unused[64];
 } openm1_config_t;
 
 void config_store_defaults(openm1_config_t *config);

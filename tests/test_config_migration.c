@@ -54,7 +54,7 @@ int main(void)
     old_config_v2_t old_v2;
     openm1_config_t current;
     memset(&old,0,sizeof(old));
-    assert(sizeof(old)==604 && sizeof(old_v2)==608 && sizeof(current)==708);
+    assert(sizeof(old)==604 && sizeof(old_v2)==608 && sizeof(current)==936);
     old.magic=OPENM1_CONFIG_MAGIC;old.version=1;old.size=sizeof(old);
     strcpy(old.host,"192.168.1.10");strcpy(old.username,"mqtt-user");
     strcpy(old.password,"private-test-value");strcpy(old.client_id,"OpenM1-12ABCD");
@@ -64,7 +64,8 @@ int main(void)
     memset(&flash,0xff,sizeof(flash));memcpy(&flash,&old,sizeof(old));
     assert(config_store_init()==0 && writes==1);
     config_store_get(&current);
-    assert(current.version==3 && current.brightness_level==4 && current.last_nonzero_brightness==4);
+    assert(current.version==4 && current.brightness_level==4 && current.last_nonzero_brightness==4);
+    assert(!current.proxy_enabled && current.proxy_port==1080);
     assert(!strcmp(current.host,old.host) && !strcmp(current.password,old.password));
     assert(current.mqtt_enabled==1 && current.ha_enabled==1);
     assert(!current.wifi_ssid[0] && !current.wifi_password[0]);
@@ -82,12 +83,37 @@ int main(void)
     writes=0;
     assert(config_store_init()==0 && writes==1);
     config_store_get(&current);
-    assert(current.version==3 && current.brightness_level==2 && current.last_nonzero_brightness==3);
+    assert(current.version==4 && current.brightness_level==2 && current.last_nonzero_brightness==3);
     assert(!strcmp(current.host,old.host) && !strcmp(current.username,old.username));
     assert(!strcmp(current.password,old.password) && !strcmp(current.client_id,old.client_id));
     assert(!strcmp(current.base_topic,old.base_topic) && !strcmp(current.discovery_prefix,old.discovery_prefix));
     assert(current.mqtt_enabled==1 && current.ha_enabled==1);
     assert(!current.wifi_ssid[0] && !current.wifi_auto_connect && !current.ap_disable_after_sta_connected);
+    /* The v0.6.18 v3 prefix survives a v4 boot without a Flash write. */
+    strcpy(current.wifi_ssid,"SavedWiFi");
+    strcpy(current.wifi_password,"saved-secret");
+    current.wifi_auto_connect=1;
+    current.version=3;current.size=708;
+    current.crc32=old_crc(&current,708);
+    memset(&flash,0xff,sizeof(flash));memcpy(&flash,&current,708);
+    writes=0;
+    assert(config_store_init()==0 && writes==0);
+    config_store_get(&current);
+    assert(current.version==4 && !strcmp(current.wifi_ssid,"SavedWiFi"));
+    assert(!strcmp(current.wifi_password,"saved-secret") && current.wifi_auto_connect);
+    assert(!current.proxy_enabled && current.proxy_port==1080);
+    /* v0.6.19 v4 settings remain readable; the former AP password is ignored. */
+    current.proxy_enabled=1;
+    current.proxy_port=1080;
+    strcpy(current.proxy_host,"192.0.2.20");
+    memset(current.legacy_unused,'X',sizeof(current.legacy_unused));
+    current.crc32=old_crc(&current,sizeof(current));
+    flash=current;writes=0;
+    assert(config_store_init()==0 && writes==0);
+    config_store_get(&current);
+    assert(current.proxy_enabled && !strcmp(current.proxy_host,"192.0.2.20"));
+    assert(current.legacy_unused[0]==0 && current.legacy_unused[63]==0);
+    assert(flash.legacy_unused[0]==0 && flash.legacy_unused[63]==0);
     strcpy(current.wifi_ssid,"TestWiFi");strcpy(current.wifi_password,"secret");
     current.wifi_auto_connect=1;current.ap_disable_after_sta_connected=1;
     assert(config_store_save(&current)==kNoErr);
