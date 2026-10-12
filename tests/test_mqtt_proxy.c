@@ -99,6 +99,7 @@ static void run_case(int scenario,const char *target,int expected_atyp,int succe
 int main(void)
 {
     openm1_config_t config; mqtt_proxy_stage_t stage;int fd,error,auth,target;
+    server_t server;pthread_t thread;
     run_case(0,"192.0.2.1",1,1);
     run_case(0,"240e:30d:3c4:9801::8f1",4,1);
     run_case(0,"mqtt.example.org",3,1);
@@ -108,6 +109,15 @@ int main(void)
     run_case(4,"192.0.2.1",1,0);
     run_case(5,"192.0.2.1",1,0);
     run_case(6,"192.0.2.1",0,0);
+    memset(&server,0,sizeof(server));server.scenario=7;
+    defaults(&config);config.proxy_enabled=0;strcpy(config.host,"127.0.0.1");
+    config.port=(uint16_t)start_server(&server,&thread);
+    assert(mqtt_proxy_open(&config,&fd,&stage,&error,&auth,&target)==0 && fd>=0);
+    close(fd);pthread_join(thread,NULL);close(server.listener);
+    /* Listener is gone: both direct and proxy paths must report TCP failure. */
+    assert(mqtt_proxy_open(&config,&fd,&stage,&error,&auth,&target)<0 && fd==-1);
+    config.proxy_enabled=1;config.proxy_port=config.port;
+    assert(mqtt_proxy_open(&config,&fd,&stage,&error,&auth,&target)<0 && fd==-1);
     defaults(&config);strcpy(config.host,"2001:db8::1");config.proxy_enabled=0;
     assert(mqtt_proxy_open(&config,&fd,&stage,&error,&auth,&target)<0);
     assert(fd==-1 && stage==PROXY_STAGE_DIRECT_IPV6);
