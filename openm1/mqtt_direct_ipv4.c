@@ -1,4 +1,5 @@
 #include "mqtt_direct_ipv4.h"
+#include "mico.h"
 #include "mico_socket.h"
 #include <string.h>
 
