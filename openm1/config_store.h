@@ -38,6 +38,8 @@ typedef struct {
 } openm1_config_t;
 
 void config_store_defaults(openm1_config_t *config);
+/* Read only, before config_store_init and before the Recovery AP starts. */
+void config_store_boot_ap_password(char out[64]);
 OSStatus config_store_init(void);
 void config_store_get(openm1_config_t *out);
 OSStatus config_store_save(const openm1_config_t *config);

@@ -115,11 +115,7 @@ int mqtt_proxy_open(const openm1_config_t *config,int *fd,mqtt_proxy_stage_t *st
     *fd=-1;*error=0;*authenticated=0;*target_connected=0;
     *stage=PROXY_STAGE_NONE;
     if (recovery_ota_busy()) return -1;
-    if (!config->proxy_enabled) {
-        if (strchr(config->host,':')) {*stage=PROXY_STAGE_DIRECT_IPV6;return -1;}
-        return connect_ipv4(config->host,config->port,fd,stage,error)==0 &&
-            ioctl(*fd,FIONBIO,&blocking)==0?0:(*fd>=0?(close(*fd),*fd=-1,-1):-1);
-    }
+    if (!config->proxy_enabled) {*stage=PROXY_STAGE_PROTOCOL;return -1;}
     if (!config->proxy_host[0] || !config->proxy_port ||
         (config->proxy_username[0] && !config->proxy_password[0])) {
         *stage=PROXY_STAGE_PROTOCOL;return -1;

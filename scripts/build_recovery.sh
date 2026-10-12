@@ -22,6 +22,8 @@ cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_socks5_protocol.c openm1/s
 /tmp/openm1-socks5-test
 cc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_mqtt_proxy.c openm1/mqtt_proxy.c openm1/socks5_protocol.c -pthread -o /tmp/openm1-mqtt-proxy-test
 /tmp/openm1-mqtt-proxy-test
+cc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_mqtt_direct_ipv4.c openm1/mqtt_direct_ipv4.c -o /tmp/openm1-mqtt-direct-test
+/tmp/openm1-mqtt-direct-test
 cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_ap_security.c openm1/ap_security.c -o /tmp/openm1-ap-security-test
 /tmp/openm1-ap-security-test
 python3 tests/test_v013_factory_reset_static.py

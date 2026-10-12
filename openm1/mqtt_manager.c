@@ -13,6 +13,7 @@
 #include "MQTTClient.h"
 #include "mqtt_bounded_read.h"
 #include "mqtt_diagnostics.h"
+#include "mqtt_direct_ipv4.h"
 #include "mqtt_proxy.h"
 #include "socks5_protocol.h"
 #include <stdio.h>
@@ -225,12 +226,16 @@ int mqtt_manager_configure(const char *body,size_t length)
     /* Called only by the single-client HTTP thread; avoid a ~2 KiB frame. */
     static json_min_field_t fields[12];
     openm1_config_t next;
+    char original_base_topic[sizeof(next.base_topic)];
+    char original_discovery_prefix[sizeof(next.discovery_prefix)];
     int count,i,clear_password=0;
     unsigned number;
     if (!manager_ready || !body || length>1024) return -1;
     count=json_min_parse(body,length,fields,12);
     if (count<0) return -1;
     config_store_get(&next);
+    memcpy(original_base_topic,next.base_topic,sizeof(original_base_topic));
+    memcpy(original_discovery_prefix,next.discovery_prefix,sizeof(original_discovery_prefix));
     for (i=0;i<count;i++) {
         const json_min_field_t *f=&fields[i];
         if (!strcmp(f->key,"host")) { if (copy_string(next.host,sizeof(next.host),f)) return -1; }
@@ -251,10 +256,8 @@ int mqtt_manager_configure(const char *body,size_t length)
         !valid_topic(next.discovery_prefix,sizeof(next.discovery_prefix))) return -1;
     if (next.ha_enabled) {
         /* Topic changes while Discovery is active would strand retained topics. */
-        openm1_config_t old;
-        config_store_get(&old);
-        if (strcmp(old.discovery_prefix,next.discovery_prefix) ||
-            strcmp(old.base_topic,next.base_topic)) return -2;
+        if (strcmp(original_discovery_prefix,next.discovery_prefix) ||
+            strcmp(original_base_topic,next.base_topic)) return -2;
     }
     return config_store_save(&next)==kNoErr?0:-3;
 }
@@ -303,10 +306,21 @@ static int network_open(Network *network,const openm1_config_t *config,mqtt_fail
     status.last_socket_read_result=0;
     status.last_socket_write_result=0;
     mico_rtos_unlock_mutex(&status_mutex);
+    if (!config->proxy_enabled) {
+        /* Restore the v0.6.18 blocking IPv4 path. The fixed MOC kernel has
+         * not validated FIONBIO/select/SO_ERROR for normal MQTT traffic. */
+        mico_rtos_lock_mutex(&status_mutex);
+        strcpy(status.proxy_stage,"disabled");
+        status.proxy_error=0;
+        status.proxy_authenticated=0;
+        status.proxy_target_connected=0;
+        mico_rtos_unlock_mutex(&status_mutex);
+        if (mqtt_direct_ipv4_open(config->host,config->port,&network->my_socket,failure_stage))
+            return -1;
+        goto connected;
+    }
     if (mqtt_proxy_open(config,&network->my_socket,&stage,&error,&authenticated,&target_connected)) {
-        *failure_stage=config->proxy_enabled?MQTT_STAGE_PROXY:
-            stage==PROXY_STAGE_DIRECT_IPV6?MQTT_STAGE_DIRECT_IPV6:
-            stage==PROXY_STAGE_DNS?MQTT_STAGE_DNS:MQTT_STAGE_TCP_CONNECT;
+        *failure_stage=MQTT_STAGE_PROXY;
         mico_rtos_lock_mutex(&status_mutex);
         snprintf(status.proxy_stage,sizeof(status.proxy_stage),"%s",mqtt_proxy_stage_name(stage));
         snprintf(status.proxy_last_error_stage,sizeof(status.proxy_last_error_stage),"%s",mqtt_proxy_stage_name(stage));
@@ -317,10 +331,11 @@ static int network_open(Network *network,const openm1_config_t *config,mqtt_fail
         return -1;
     }
     mico_rtos_lock_mutex(&status_mutex);
-    strcpy(status.proxy_stage,config->proxy_enabled?"connected":"disabled");
+    strcpy(status.proxy_stage,"connected");
     status.proxy_error=0;status.proxy_authenticated=authenticated;
     status.proxy_target_connected=target_connected;
     mico_rtos_unlock_mutex(&status_mutex);
+connected:
     network->mqttread=openm1_mqtt_read;
     network->mqttwrite=openm1_mqtt_write;
     network->disconnect=MICO_disconnect;

@@ -1,5 +1,7 @@
 # OpenM1 v0.6.19
 
+> **Recovery 紧急修复：** v0.6.19 的 `6b40ad09` 已出现真实 M1 救援热点可关联、`192.168.4.1` 间歇不可达的回归。后续修复提交恢复 AP/HTTP 先启动的顺序，启动时只读 AP 密码，v1–v3 配置仅在 RAM 中迁移并等首次显式保存才写参数 Flash；代理关闭的 MQTT 恢复已验证的 IPv4 阻塞连接。修复的实机效果仍须按下文验收，不能仅以 Actions 构建通过判定故障已消失。
+
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
 ## 实机验证状态
@@ -43,6 +45,12 @@ v0.6.15 根据真实 M1 的历史记录修正 Recovery AP 策略：配置为“�
 已移除 v0.6.14～v0.6.18 的全部原生 IPv6 实验诊断、相关线程与 API。M1 本地 MQTT 仅建立 IPv4 TCP；开启 SOCKS5 后，由 IPv4 代理对 IPv4、域名或 IPv6 Broker 建立隧道。IPv6 字面量只在应用层编码为 SOCKS5 地址，设备不创建 IPv6 Socket。代理关闭时原有 IPv4 MQTT 直连行为保留，代理参数仍存储。独立的代理测试只建立目标 TCP 隧道，然后关闭，不发送 MQTT 凭据。详情见 [MQTT 代理说明](docs/mqtt-proxy.md)。
 
 配置从 v3 迁移至 v4，保留 Broker、Wi-Fi、HA、亮度、主题与 Client ID。Recovery AP 密码独立于家庭 Wi-Fi 密码；设置或清除后只写参数 Flash，下次重启才请求新 AP 安全模式，AP 自愈沿用本次启动的密码。固定 SDK 的 `network_InitTypeDef_st.wifi_key` 支持提供 Soft AP 密码，但 MK3080B WPA2 广播、客户端认证及 AP+STA 稳定性尚需真实设备验证。管理页面自身没有登录认证。
+
+### v0.6.19 Recovery 回归排查
+
+`6b40ad09` 把 `config_store_init()` 移到 `StartNetwork(SoftAP)` 和 HTTP 启动之前。设备从 v3 首次进入 v4 时，该调用立即执行 `mico_system_context_update()`；固定 SDK 会擦写两个参数分区并校验 CRC。已下载的故障版本 CI `.su` 显示 `main` 帧 1104 字节、`config_store_save` 帧 1888 字节；仅这两帧已占 2992/4096 字节，未计 SDK Flash、RTOS 与中断调用。HTTP 配置保存路径也会叠加 `handle_client` 2024、`mqtt_manager_configure` 1904、`config_store_save` 1888，达到 5816/6144 字节，尚未计 SDK。它们是明确的风险路径，尚不能单凭代码证明哪条导致了实机故障。修复版不再于启动期写参数 Flash，并减少保存时叠加的大结构体；CI 额外检查已知嵌套帧总量和剩余余量。固定 Kernel/SDK 的全部动态栈深度仍需真实设备观测。
+
+验收时请先在手机 Wi-Fi 详情确认客户端取得 `192.168.4.x/24`，网关是 `192.168.4.1`；没有租约时先定位 AP DHCP。确认手机关闭蜂窝自动切换后，分别在开机后 10、40、70、120 秒打开 `/api/health` 与 `/api/info`，并记录响应和耗时。首次可访问时保存 `/api/wifi/status`、`/api/wifi/history`、`/api/system/stats`、`/api/display/status` 和 `/api/logs/download`；重点对齐 `first Station arm` / `StartNetwork(STA)`、AP_UP/AP_DOWN、`recovery_ap_observed`、`wifi_control_loop_count`、`last_wifi_control_tick_ms`、Station Link/IP 查询值、栈溢出计数与网页失效时刻。`HTTP listening on 0.0.0.0:80` 只证明监听成功，不能证明 DHCP 租约或手机可达；`recovery_ap_observed` 只证明 SDK 返回 AP IP 为 `192.168.4.1`，不能证明 DHCP Server 已发租约。若图标常亮而控制循环计数不再增长，优先查 WLAN 调用阻塞；若计数增长但 Link/IP 查询无效，图标是缓存或网络检测状态，不能视作 Station 已在路由器上线。
 
 ## 页面与接口
 

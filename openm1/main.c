@@ -184,20 +184,12 @@ int main(void)
         printf("DEVICE: DHCP hostname setup unavailable\r\n");
     openm1_log_info("RECOVERY","SSID = %s",recovery_ssid);
 
-    result=config_store_init();
-    boot_log_init_error("config",result);
-    openm1_log_info("BOOT","config init result = %d",result);
     printf("RECOVERY: starting SoftAP\r\n");
     memset(&wifi_config, 0, sizeof(wifi_config));
     wifi_config.wifi_mode = Soft_AP;
     snprintf(wifi_config.wifi_ssid, sizeof(wifi_config.wifi_ssid), "%s", recovery_ssid);
-    {
-        openm1_config_t startup_config;
-        config_store_get(&startup_config);
-        wifi_manager_set_boot_ap_password(startup_config.recovery_ap_password);
-        memcpy(wifi_config.wifi_key,startup_config.recovery_ap_password,
-               sizeof(startup_config.recovery_ap_password));
-    }
+    config_store_boot_ap_password(wifi_config.wifi_key);
+    wifi_manager_set_boot_ap_password(wifi_config.wifi_key);
     memcpy(wifi_config.local_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     memcpy(wifi_config.net_mask, "255.255.255.0", sizeof("255.255.255.0"));
     memcpy(wifi_config.gateway_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
@@ -233,6 +225,9 @@ int main(void)
     }
     printf("BOOT: phase 1 recovery ready\r\n");
     boot_heap_log("after HTTP");
+    result=config_store_init();
+    boot_log_init_error("config",result);
+    openm1_log_info("BOOT","config init result = %d",result);
     result=button_manager_init();
     boot_log_init_error("button manager",result);
     wifi_result=wifi_manager_init();

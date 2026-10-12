@@ -74,7 +74,7 @@ int main(void)
     old.port=1883;old.publish_interval=5;old.mqtt_enabled=1;old.ha_enabled=1;
     old.crc32=old_crc(&old,sizeof(old));
     memset(&flash,0xff,sizeof(flash));memcpy(&flash,&old,sizeof(old));
-    assert(config_store_init()==0 && writes==1);
+    assert(config_store_init()==0 && writes==0);
     config_store_get(&current);
     assert(current.version==4 && current.brightness_level==4 && current.last_nonzero_brightness==4);
     assert(!current.proxy_enabled && current.proxy_port==1080 && !current.recovery_ap_password[0]);
@@ -82,7 +82,7 @@ int main(void)
     assert(current.mqtt_enabled==1 && current.ha_enabled==1);
     assert(!current.wifi_ssid[0] && !current.wifi_password[0]);
     assert(!current.wifi_auto_connect && !current.ap_disable_after_sta_connected);
-    assert(config_store_save_brightness(0,3)==0 && writes==2);
+    assert(config_store_save_brightness(0,3)==0 && writes==1);
     config_store_get(&current);
     assert(current.brightness_level==0 && current.last_nonzero_brightness==3);
     assert(!strcmp(current.password,old.password) && current.ha_enabled==1);
@@ -93,7 +93,7 @@ int main(void)
     old_v2.crc32=old_crc(&old_v2,sizeof(old_v2));
     memset(&flash,0xff,sizeof(flash));memcpy(&flash,&old_v2,sizeof(old_v2));
     writes=0;
-    assert(config_store_init()==0 && writes==1);
+    assert(config_store_init()==0 && writes==0);
     config_store_get(&current);
     assert(current.version==4 && current.brightness_level==2 && current.last_nonzero_brightness==3);
     assert(!strcmp(current.host,old.host) && !strcmp(current.username,old.username));
@@ -109,13 +109,23 @@ int main(void)
     old_v3.crc32=old_crc(&old_v3,sizeof(old_v3));
     memset(&flash,0xff,sizeof(flash));memcpy(&flash,&old_v3,sizeof(old_v3));
     writes=0;
-    assert(config_store_init()==0 && writes==1);
+    assert(config_store_init()==0 && writes==0);
     config_store_get(&current);
     assert(current.version==4 && !current.proxy_enabled && current.proxy_port==1080);
     assert(!strcmp(current.wifi_ssid,"SavedWiFi") && !strcmp(current.wifi_password,"station-secret"));
     assert(current.wifi_auto_connect && current.ap_disable_after_sta_connected);
     assert(!strcmp(current.host,old.host) && !strcmp(current.password,old.password));
     assert(!current.recovery_ap_password[0]);
+    { char boot_password[64];
+      config_store_boot_ap_password(boot_password);
+      assert(!boot_password[0]); /* v3 has no AP credential. */
+      update_result=-5;
+      assert(config_store_save(&current)==-5 && writes==1);
+      assert(((old_config_v3_t *)&flash)->version==3);
+      update_result=0;
+      assert(config_store_save(&current)==0 && writes==2);
+      assert(flash.version==4);
+    }
     memset(&flash,0,sizeof(flash));config_store_defaults(&flash);
     writes=0;
     assert(config_store_init()==0 && writes==0);
@@ -128,6 +138,14 @@ int main(void)
     assert(config_store_save(&current)==kNoErr);
     assert(!strcmp(flash.recovery_ap_password,"Recovery123"));
     assert(!strcmp(flash.proxy_password,"proxy-secret"));
+    { char boot_password[64];
+      config_store_boot_ap_password(boot_password);
+      assert(!strcmp(boot_password,"Recovery123"));
+      flash.crc32^=1u;
+      config_store_boot_ap_password(boot_password);
+      assert(!boot_password[0]);
+      flash.crc32^=1u;
+    }
     ota_busy=1;
     current.proxy_enabled=0;
     assert(config_store_save(&current)==kNotPreparedErr);

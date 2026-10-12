@@ -133,6 +133,15 @@ static int config_v1_valid(const openm1_config_v1_t *old)
            old->discovery_prefix[64]==0 && old->port>0 &&
            old->publish_interval>=2 && old->publish_interval<=300;
 }
+void config_store_boot_ap_password(char out[64])
+{
+    const openm1_config_t *saved;
+    if (!out) return;
+    out[0]=0;
+    saved=(const openm1_config_t *)mico_system_context_get_user_data(mico_system_context_get());
+    if (saved && config_valid(saved))
+        memcpy(out,saved->recovery_ap_password,64);
+}
 OSStatus config_store_init(void)
 {
     openm1_config_t *saved=(openm1_config_t *)mico_system_context_get_user_data(mico_system_context_get());
@@ -169,9 +178,14 @@ OSStatus config_store_init(void)
         printf("CONFIG: using defaults; no parameter flash write\r\n");
     }
     config_ready=1;
+    /* The boot path must not erase both parameter partitions. Keep legacy
+     * settings in RAM; the first explicit configuration save persists v4. */
     if (migrate) {
-        err=config_store_save(&config_cache);
-        if (err!=kNoErr) printf("CONFIG: migration save failed = %d; settings retained in RAM\r\n",err);
+        config_cache.magic=OPENM1_CONFIG_MAGIC;
+        config_cache.version=OPENM1_CONFIG_VERSION;
+        config_cache.size=sizeof(config_cache);
+        config_cache.crc32=config_crc32(&config_cache);
+        printf("CONFIG: migration in RAM; persistence deferred\r\n");
     }
     return kNoErr;
 }
@@ -184,46 +198,50 @@ void config_store_get(openm1_config_t *out)
 }
 OSStatus config_store_save(const openm1_config_t *config)
 {
-    openm1_config_t next,previous;
+    openm1_config_t previous;
     openm1_config_t *saved;
     OSStatus err;
     if (!config_ready || !config || recovery_ota_busy()) return kNotPreparedErr;
-    next=*config;
-    next.magic=OPENM1_CONFIG_MAGIC;
-    next.version=OPENM1_CONFIG_VERSION;
-    next.size=sizeof(next);
-    next.crc32=config_crc32(&next);
-    if (!config_valid(&next)) return kParamErr;
     mico_rtos_lock_mutex(&config_mutex);
     saved=(openm1_config_t *)mico_system_context_get_user_data(mico_system_context_get());
+    if (!saved) {mico_rtos_unlock_mutex(&config_mutex);return kNotPreparedErr;}
     previous=*saved;
-    *saved=next;
+    *saved=*config;
+    saved->magic=OPENM1_CONFIG_MAGIC;
+    saved->version=OPENM1_CONFIG_VERSION;
+    saved->size=sizeof(*saved);
+    saved->crc32=config_crc32(saved);
+    if (!config_valid(saved)) {
+        *saved=previous;
+        mico_rtos_unlock_mutex(&config_mutex);
+        return kParamErr;
+    }
     err=mico_system_context_update(mico_system_context_get());
-    if (err==kNoErr) config_cache=next;
+    if (err==kNoErr) config_cache=*saved;
     else *saved=previous;
     mico_rtos_unlock_mutex(&config_mutex);
     return err;
 }
 OSStatus config_store_save_brightness(uint8_t brightness, uint8_t last_nonzero)
 {
-    openm1_config_t next,previous;
+    openm1_config_t previous;
     openm1_config_t *saved;
     OSStatus err;
     if (!config_ready || recovery_ota_busy() || brightness>4 ||
         last_nonzero<1 || last_nonzero>4) return kParamErr;
     mico_rtos_lock_mutex(&config_mutex);
     saved=(openm1_config_t *)mico_system_context_get_user_data(mico_system_context_get());
+    if (!saved) {mico_rtos_unlock_mutex(&config_mutex);return kNotPreparedErr;}
     previous=*saved;
-    next=config_cache;
-    next.brightness_level=brightness;
-    next.last_nonzero_brightness=last_nonzero;
-    next.magic=OPENM1_CONFIG_MAGIC;
-    next.version=OPENM1_CONFIG_VERSION;
-    next.size=sizeof(next);
-    next.crc32=config_crc32(&next);
-    *saved=next;
+    *saved=config_cache;
+    saved->brightness_level=brightness;
+    saved->last_nonzero_brightness=last_nonzero;
+    saved->magic=OPENM1_CONFIG_MAGIC;
+    saved->version=OPENM1_CONFIG_VERSION;
+    saved->size=sizeof(*saved);
+    saved->crc32=config_crc32(saved);
     err=mico_system_context_update(mico_system_context_get());
-    if (err==kNoErr) config_cache=next;
+    if (err==kNoErr) config_cache=*saved;
     else *saved=previous;
     mico_rtos_unlock_mutex(&config_mutex);
     return err;

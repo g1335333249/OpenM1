@@ -46,7 +46,9 @@ optional=3072+1024+6144 # health, CPU, MQTT
 frames={}
 needed=('housekeeping_worker','wifi_control_worker','recovery_http_server_thread','m1_uart_worker',
         'network_display_worker','health_worker','mqtt_worker','button_manager_tick',
-        'config_store_factory_reset')
+        'config_store_factory_reset','main','config_store_init','config_store_save',
+        'config_store_save_brightness','handle_client','mqtt_manager_configure',
+        'wifi_manager_save_settings')
 for path in a.su_dir.glob('*.su'):
     for line in path.read_text().splitlines():
         parts=line.split('\t')
@@ -76,6 +78,15 @@ report=[f'APP_HEAP_REGION_BYTES={heap}',f'CRITICAL_THREAD_STACK_BUDGET={critical
         f'BOOT_THEORETICAL_RESERVE_WITH_APP_HOUSEKEEPING_OVERLAP={boot_overlap_reserve}',
         'APP_THREAD_RELEASED_AFTER_BOOT=YES',
         'STACK_USAGE_SCOPE=individual function frames only; external SDK call chains excluded']
+http_config_chain=frames['handle_client'][0]+max(frames['mqtt_manager_configure'][0],
+    frames['wifi_manager_save_settings'][0])+frames['config_store_save'][0]
+http_brightness_chain=frames['handle_client'][0]+frames['config_store_save_brightness'][0]
+boot_config_chain=frames['main'][0]+frames['config_store_init'][0]
+report += [f'HTTP_CONFIG_KNOWN_NESTED_FRAMES={http_config_chain}',
+           f'HTTP_CONFIG_REMAINING_FOR_SDK_AND_INTERRUPTS={6144-http_config_chain}',
+           f'HTTP_BRIGHTNESS_KNOWN_NESTED_FRAMES={http_brightness_chain}',
+           f'BOOT_CONFIG_KNOWN_NESTED_FRAMES={boot_config_chain}',
+           'NESTED_STACK_SCOPE=known C frames only; SDK flash and MOC kernel frames unverified']
 for name in needed:
     size,kind,source=frames[name]
     report.append(f'{name}: {size} bytes ({kind}; {source})')
@@ -83,3 +94,5 @@ a.output.write_text('\n'.join(report)+'\n')
 print('\n'.join(report))
 if reserve<14000 or reserve-ota<10000 or boot_overlap_reserve<10000:
     raise SystemExit('theoretical heap reserve below safety threshold')
+if http_config_chain>5120 or boot_config_chain>3072:
+    raise SystemExit('known nested stack frames leave insufficient SDK/interrupt margin')
