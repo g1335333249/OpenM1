@@ -230,6 +230,7 @@ static OSStatus recovery_ap_start(void)
     memset(&config,0,sizeof(config));
     config.wifi_mode=Soft_AP;
     snprintf(config.wifi_ssid,sizeof(config.wifi_ssid),"%s",recovery_ssid());
+    snprintf(config.wifi_key,sizeof(config.wifi_key),"%s",RECOVERY_AP_DEFAULT_PASSWORD);
     memcpy(config.local_ip_addr,RECOVERY_IP,sizeof(RECOVERY_IP));
     memcpy(config.net_mask,"255.255.255.0",sizeof("255.255.255.0"));
     memcpy(config.gateway_ip_addr,RECOVERY_IP,sizeof(RECOVERY_IP));

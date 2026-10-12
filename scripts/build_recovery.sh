@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.20
+PREFIX=OpenM1-v0.6.20-ap-password-test
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 if [[ "$(uname -s)" == Darwin ]]; then BUILD_HOST_OS=OSX; else BUILD_HOST_OS=Linux64; fi
 TOOL=".micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/$BUILD_HOST_OS/bin"
@@ -20,6 +20,7 @@ python3 tests/test_v016_ipv6_static.py
 python3 tests/test_v017_ipv6_static.py
 python3 tests/test_v018_ipv6_static.py
 python3 tests/test_v020_proxy_static.py
+python3 tests/test_recovery_ap_fixed_password.py
 cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_socks5_protocol.c openm1/socks5_protocol.c -o /tmp/openm1-socks5-test
 /tmp/openm1-socks5-test
 cc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -pthread -Itests/stubs -Iopenm1 tests/test_mqtt_proxy.c openm1/mqtt_proxy.c openm1/socks5_protocol.c -o /tmp/openm1-proxy-test

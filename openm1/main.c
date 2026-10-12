@@ -127,11 +127,11 @@ int main(void)
     result=openm1_log_init();
     if (result!=kNoErr) printf("BOOT: RAM logger unavailable: %d\r\n",result);
     openm1_log_info("BOOT","app_thread stack configured = %lu",(unsigned long)app_stack_size);
-    openm1_log_info("BOOT","OpenM1 v0.6.20");
+    openm1_log_info("BOOT","OpenM1 v0.6.20 AP-password test");
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.20\r\n"
+           "Version: 0.6.20 AP-password test\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -189,6 +189,7 @@ int main(void)
     memset(&wifi_config, 0, sizeof(wifi_config));
     wifi_config.wifi_mode = Soft_AP;
     snprintf(wifi_config.wifi_ssid, sizeof(wifi_config.wifi_ssid), "%s", recovery_ssid);
+    snprintf(wifi_config.wifi_key, sizeof(wifi_config.wifi_key), "%s", RECOVERY_AP_DEFAULT_PASSWORD);
     memcpy(wifi_config.local_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     memcpy(wifi_config.net_mask, "255.255.255.0", sizeof("255.255.255.0"));
     memcpy(wifi_config.gateway_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
