@@ -9,4 +9,6 @@
 OSStatus ipv6_diagnostic_init(void);
 int ipv6_diagnostic_start(void);
 int ipv6_diagnostic_start_tcp(void);
+int ipv6_diagnostic_start_deep(void);
 void ipv6_diagnostic_status_json(char *out,size_t capacity);
+void ipv6_diagnostic_deep_json(char *out,size_t capacity);

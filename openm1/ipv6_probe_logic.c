@@ -58,3 +58,23 @@ const char *ipv6_parse_status(int result)
     if (result==IPV6_PROBE_NOT_ATTEMPTED) return "not_tested";
     return "error";
 }
+const char *tcp_probe_outcome(int connect_result,int connect_errno,
+                              int select_result,int writable,int exception,
+                              int getsockopt_result,int so_error_checked,int so_error)
+{
+    if (connect_result==0) return "connected";
+    if (connect_errno==ENETUNREACH || connect_errno==EHOSTUNREACH) return "no_route";
+    if (connect_errno==ECONNREFUSED) return "refused";
+    if (select_result==0) return "timeout";
+    if (select_result<0 || getsockopt_result<0 || !so_error_checked)
+        return "socket_error";
+    if (so_error==ENETUNREACH || so_error==EHOSTUNREACH) return "no_route";
+    if (so_error==ECONNREFUSED) return "refused";
+    if (so_error==ETIMEDOUT) return "timeout";
+    if (select_result>0 && writable && !exception && so_error==0 &&
+        connect_errno==0)
+        return "kernel_errno_unavailable";
+    if (select_result>0 && writable && !exception && so_error==0)
+        return "connected";
+    return "socket_error";
+}

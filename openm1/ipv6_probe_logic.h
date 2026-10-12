@@ -26,3 +26,6 @@ int ipv6_should_query_dns(int parse_result,int socket_result,
 const char *ipv6_probe_verdict(int api_present,int socket_result,int tcp_attempted,
                                int tcp_connected);
 const char *ipv6_parse_status(int result);
+const char *tcp_probe_outcome(int connect_result,int connect_errno,
+                              int select_result,int writable,int exception,
+                              int getsockopt_result,int so_error_checked,int so_error);
