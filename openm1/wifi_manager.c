@@ -65,9 +65,9 @@ static unsigned scan_count;
 static char scan_state[12]="idle";
 static uint32_t scan_started_ms;
 static int scan_registered;
-/* 32 compact transition snapshots. The old 3300-byte scan JSON buffer is
+/* 16 compact transition snapshots. The old 3300-byte scan JSON buffer is
  * streamed by HTTP, so this history does not raise the permanent RAM budget. */
-#define WIFI_HISTORY_CAPACITY 32u
+#define WIFI_HISTORY_CAPACITY 16u
 typedef struct {
     uint32_t sequence,uptime_ms,disconnect_count,native_reconnect_count;
     uint32_t station_rearm_count,ap_restore_count;

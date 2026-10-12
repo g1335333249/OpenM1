@@ -4,7 +4,7 @@
 
 关闭代理时，M1 通过家庭 Wi-Fi 的 IPv4 网络直接连接 MQTT Broker。开启代理时，M1 仍只建立 IPv4 TCP Socket，先连接 SOCKS5 服务器，按 RFC 1928/1929 完成方法协商、可选用户名密码认证和 TCP CONNECT，再在隧道里运行原有 MQTT。Broker 可以是 IPv4、域名或普通/压缩 IPv6 字面量。域名以 SOCKS5 `ATYP=03` 交给代理解析；IPv6 字面量仅在 APP 中编码为 16 字节 `ATYP=04`，M1 不建立原生 IPv6 Socket。带 `%` 作用域的地址和链路本地 IPv6 地址不被接受。
 
-先在 MQTT 服务卡片填写 Broker 地址、端口、MQTT 账号、Client ID、Topic 等并保存。代理卡片的开关默认关闭；启用后填写云服务器 IPv4 地址或可解析出 A 记录的域名、端口（默认 1080）和独立的代理账号。点击“保存代理配置”后才生效。每台 M1 应使用独立的 MQTT Client ID 和代理账号。关闭代理不会清除已保存的代理参数。**代理失败不会自动改为直连。**直连模式不能连接纯 IPv6 Broker，会显示 `direct_ipv6_unsupported`。原有 HA Discovery、LWT、亮度命令和 MAC 派生主题结构沿用 MQTT 层实现。
+先在 MQTT 服务卡片填写 Broker 地址、端口、MQTT 账号、Client ID、Topic 等并保存。代理卡片的开关默认关闭；启用后填写云服务器 IPv4 地址或可解析出 A 记录的域名、端口（默认 1080）和独立的代理账号。点击“保存代理配置”后才生效。每台 M1 应使用独立的 MQTT Client ID 和代理账号。代理主机最多 63 字节、用户名最多 31 字节、密码最多 63 字节。关闭代理不会清除已保存的代理参数。**代理失败不会自动改为直连。**直连模式不能连接纯 IPv6 Broker，会显示 `direct_ipv6_unsupported`。原有 HA Discovery、LWT、亮度命令和 MAC 派生主题结构沿用 MQTT 层实现。
 
 “测试代理连接”只建立 SOCKS5 CONNECT 并关闭测试 Socket，不发送 MQTT 账号或消息，不修改当前 MQTT 会话。测试需要 Station 联网、代理已启用、Broker 已配置且 OTA/低内存安全模式未运行。`GET /api/mqtt/proxy/status` 和 `GET /api/mqtt/status` 报告模式、代理认证、目标连接和错误阶段，密码只显示是否已设置。代理 TCP、方法、认证和目标 CONNECT 阶段均有限时；固定 SDK 的 IPv4 `gethostbyname` 没有公开可取消的调用级超时，域名解析仍可能等待 Kernel 自身超时。需要严格的整条路径时限时，代理地址应使用 IPv4 字面量。
 

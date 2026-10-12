@@ -63,7 +63,7 @@ RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会�
 | `POST /api/ota/url` | 从设备可访问的 HTTP URL 下载 |
 | `POST /api/reboot` | 受控重启 |
 | `GET /api/wifi/status` | 真实 AP 观察状态、自愈计数、Station 原生重连与受控重置状态、SSID、IP、RSSI 和稳定性计数；不含密码 |
-| `GET /api/wifi/history` | 最近 32 次 Wi-Fi、AP、网络健康与显示目标变化；RAM 环形记录，只读 |
+| `GET /api/wifi/history` | 最近 16 次 Wi-Fi、AP、网络健康与显示目标变化；RAM 环形记录，只读 |
 | `GET /api/wifi/settings` | 已保存 SSID、是否有凭据及两个开关；不含密码 |
 | `POST /api/wifi/settings` | 保存/清除开机 Wi-Fi 设置；只在用户提交时写参数 Flash |
 | `GET /api/system/stats` | 估算 CPU 负载、MiCO 堆信息和裸 Flash 分区元数据 |

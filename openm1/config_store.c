@@ -94,8 +94,8 @@ static int config_valid(const openm1_config_t *config)
            config->wifi_ssid[31]==0 && config->wifi_password[63]==0 &&
            config->wifi_auto_connect<=1 && config->ap_disable_after_sta_connected<=1 &&
            config->proxy_enabled<=1 && config->proxy_port>0 &&
-           config->proxy_host[128]==0 && config->proxy_username[64]==0 &&
-           config->proxy_password[128]==0 && config->recovery_ap_password[63]==0 &&
+           config->proxy_host[63]==0 && config->proxy_username[31]==0 &&
+           config->proxy_password[63]==0 && config->recovery_ap_password[63]==0 &&
            (!config->recovery_ap_password[0] || ap_security_password_valid(config->recovery_ap_password)) &&
            (!config->ap_disable_after_sta_connected ||
             (config->wifi_auto_connect && config->wifi_ssid[0]));

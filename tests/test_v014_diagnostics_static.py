@@ -12,7 +12,7 @@ http = (root / 'recovery_http.c').read_text()
 page = (root / 'recovery_page.html').read_text()
 mqtt = (root / 'mqtt_manager.c').read_text()
 
-assert '#define WIFI_HISTORY_CAPACITY 32u' in wifi
+assert '#define WIFI_HISTORY_CAPACITY 16u' in wifi
 assert 'static wifi_history_record_t wifi_history[WIFI_HISTORY_CAPACITY]' in wifi
 assert 'wifi_manager_history_note(WIFI_HISTORY_STATION_BAD)' in wifi
 assert 'wifi_manager_history_note(WIFI_HISTORY_STATION_LOST)' in wifi
@@ -43,4 +43,4 @@ assert '#define WIFI_BOOT_AUTO_CONNECT_GRACE_MS 60000u' in (root / 'wifi_station
 assert 'WIFI_NATIVE_RETRY_INTERVAL_MS' in wifi and 'wifi_retry_interval=WIFI_NATIVE_RETRY_INTERVAL_MS' in wifi
 assert 'OPENM1_FACTORY_RESET_DRY_RUN 1' in (root / 'button_manager.h').read_text()
 assert 'OPENM1_CONFIG_VERSION 4' in (root / 'config_store.h').read_text()
-print('V014_DIAGNOSTICS_STATIC_PASS: 32-entry transitions, SOCKS5, IPv4 MQTT, WLAN/OTA guard')
+print('V014_DIAGNOSTICS_STATIC_PASS: 16-entry transitions, SOCKS5, IPv4 MQTT, WLAN/OTA guard')

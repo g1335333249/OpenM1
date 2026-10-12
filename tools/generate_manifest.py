@@ -107,7 +107,7 @@ data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.19','board':'MK3080B'
         'web_ui_tabs':True,'web_ui_tabs_verified_on_hardware':False,
         'web_api_console':True,'web_api_console_get_count':19,
         'web_api_console_post_count':20,'web_api_console_manual_requests_only':True,
-        'wifi_history_capacity':32,'wifi_history_hardware_verified':False,
+        'wifi_history_capacity':16,'wifi_history_hardware_verified':False,
         'native_ipv6_diagnostics_removed':True,'mqtt_socks5_optional':True,
         'mqtt_socks5_ipv6_target_encoding':True,'mqtt_socks5_hardware_verified':False,
         'recovery_ap_password_supported_in_sdk':True,'recovery_ap_wpa2_hardware_verified':False,

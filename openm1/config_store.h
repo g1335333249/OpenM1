@@ -31,9 +31,9 @@ typedef struct {
     uint8_t proxy_enabled;
     uint8_t proxy_reserved;
     uint16_t proxy_port;
-    char proxy_host[129];
-    char proxy_username[65];
-    char proxy_password[129];
+    char proxy_host[64];
+    char proxy_username[32];
+    char proxy_password[64];
     char recovery_ap_password[64];
 } openm1_config_t;
 
