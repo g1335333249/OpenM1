@@ -241,7 +241,7 @@ static void handle_client(int fd)
 {
     /* This server processes one client at a time. Keep the large HTTP buffers
      * out of its 6 KiB thread stack, including during nested config writes. */
-    static char request[2049], json[3072], url[512];
+    static char request[2049], json[2688], url[512];
     char method[8], path[80];
     size_t used=0,body_len=0; uint32_t length=0;
     int n,seen=0,body_start=-1;

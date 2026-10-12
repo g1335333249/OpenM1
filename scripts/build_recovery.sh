@@ -102,7 +102,9 @@ cp "$APP_ELF" "dist/$PREFIX.elf"
 cp "$APP_MAP" "dist/$PREFIX.map"
 cp build.log dist/build.log
 echo '[PASS] MK3080B@moc build'
-if "$TOOL/arm-none-eabi-nm" -u build/openm1@MK3080B@moc/modules/openm1/wifi_manager.o | grep -q 'micoWlanSuspendSoftAP'; then
+WIFI_MANAGER_OBJECT="$(find build/openm1@MK3080B@moc -type f -name wifi_manager.o -print -quit)"
+[[ -n "$WIFI_MANAGER_OBJECT" ]]
+if "$TOOL/arm-none-eabi-nm" -u "$WIFI_MANAGER_OBJECT" | grep -q 'micoWlanSuspendSoftAP'; then
     echo '[FAIL] runtime Wi-Fi manager still references SuspendSoftAP' >&2
     exit 1
 fi
