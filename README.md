@@ -180,4 +180,4 @@ python3 tools/verify_ota.py dist/OpenM1-v0.6.20-ap-password-test@MK3080B@moc.ota
   --app dist/OpenM1-v0.6.20-ap-password-test.bin
 ```
 
-本分支通过 `workflow_dispatch` 手动构建 Artifact `OpenM1-v0.6.20-ap-password-test`；推送 main 或稳定分支时仍使用各自原有提交和构建定义。测试 Artifact 包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号和校验报告。该密码版本须在真实 M1 上验证后才能考虑以新的正式版本合入 main。
+本分支可通过 `workflow_dispatch` 手动构建；为保证测试提交自动生成 Artifact，本分支的 push 也触发同一工作流。Artifact 为 `OpenM1-v0.6.20-ap-password-test`；main 和稳定分支仍使用各自原有提交和构建定义。测试 Artifact 包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号和校验报告。该密码版本须在真实 M1 上验证后才能考虑以新的正式版本合入 main。

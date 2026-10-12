@@ -34,7 +34,7 @@ for source, target in ((boot, 'wifi_config'), (restore, 'config')):
 assert main.count('StartNetwork(&wifi_config)') == 1
 assert wifi.count('StartNetwork(&config)') == 2  # Station and AP restore only.
 assert main.index('StartNetwork(&wifi_config)') < main.index('config_store_init()')
-assert 'feature/recovery-ap-default-password' not in workflow.split('branches:')[1].split(']')[0]
+assert 'feature/recovery-ap-default-password' in workflow.split('branches:')[1].split(']')[0]
 assert 'workflow_dispatch:' in workflow
 assert 'OpenM1-v0.6.20-ap-password-test' in build
 assert 'OpenM1-v0.6.20-ap-password-test' in workflow

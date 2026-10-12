@@ -2,7 +2,7 @@ name: Build OpenM1 v0.6.20 AP password test
 on:
   workflow_dispatch:
   push:
-    branches: [main, release/v0.6.20-stable]
+    branches: [main, release/v0.6.20-stable, feature/recovery-ap-default-password]
 permissions:
   contents: read
 jobs:
