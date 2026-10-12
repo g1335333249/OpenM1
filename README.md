@@ -1,4 +1,4 @@
-# OpenM1 v0.6.18
+# OpenM1 v0.6.19
 
 **开发版 / 实验版。** OpenM1 是斐讯悟空 M1 的开源固件项目。当前固件替换 EMW3080B/MK3080B 上的 MiCO/MOC 用户 APP，不刷写 ATSAMD20G17A。SDK 固定为 [MXCHIP/mico-os `9b09de78164940ff3876d2053f8e7dd42ca2b8ba`](https://github.com/MXCHIP/mico-os/tree/9b09de78164940ff3876d2053f8e7dd42ca2b8ba)，使用同 SDK 的 `3080B002.023` Kernel 和 ARM GCC 5.4.1。
 
@@ -28,35 +28,21 @@ v0.6.12 在 Recovery 管理页面新增独立的「API 调试」标签，按功�
 
 v0.6.13 增加实体按钮长按诊断和**默认开启的模拟恢复**。真实 M1 曾观察到长按约 3 秒、尚未松手时收到一个 20 字节 `23 04 00 ... 00 21` 帧；短按仍为 `0x0F` 亮度事件。仅帧头、帧尾、长度和第 2～18 字节全零的 `0x04` 帧才进入按钮状态机；未知的 UART checksum/CRC 规则**仍未证实**。首次长按打开 15 秒确认窗口，第二事件需与首次相隔 4～15 秒；现有协议没有释放事件，因此时间间隔**不能证明按钮已松开**。本版 `OPENM1_FACTORY_RESET_DRY_RUN=1`，双长按只记录模拟确认：**不写配置、不擦 Flash、不重启**。OTA 忙时取消确认。未来真实恢复路径已准备好通过现有配置默认值和 system context 更新保存，并在失败时恢复有效 RAM 配置且不重启；必须在单独实机验证后另版启用。`GET /api/button/status` 与诊断页可查看真实计数和窗口状态，不提供远程触发接口。
 
-v0.6.14 增加手动 IPv6 能力诊断与最近 32 次 Wi-Fi 状态变化历史。固定 SDK 声明 `AF_INET6`、`inet_pton()`、`getaddrinfo()`，并通过 MX1290 MOC lwIP API 表转发 Socket 操作；当前工具链可链接这些调用，但 MOC 接口表没有专用 `micoWlanGetIP6Status()`，**实际 Kernel IPv6 能力和设备是否获分配 IPv6 地址尚未在 M1 上确认**。诊断页仅在用户点击后检测 IPv6 Socket、数值地址解析和固定域名的 AAAA DNS；失败返回底层错误，DNS 失败单独标记为不确定。此测试不连接 IPv6 服务器、不启用 IPv6 MQTT，原 MQTT IPv4 路径保持不变。检测临时线程只在手动请求时创建，要求 Station 已有 IP、OTA 未忙且堆留有 OTA 安全余量。
-
 v0.6.14 开发时，周期性 Wi-Fi 图标闪烁尚缺实机同步证据，不能确认是真实掉线或状态误判。代码检查表明 `NETWORK_NO_INTERNET` 目标是 Wi-Fi 常亮加红 X；闪烁目标来自 `NETWORK_NO_WIFI`、Station 被判 LOST，或用户主动的显示测试。Station 当前连续 3 次 bad sample 判丢失，而 bad sample 可能是实际 Link 断开、Link 查询错误、IP 查询错误或 IP 无效。新 `/api/wifi/history` 只在事件和状态变化时记录原始 Link/IP 查询结果、RSSI、事件码、断线/重连/AP 恢复计数、网络健康与显示目标及实际 PWM 目标；不会每秒写历史或写 Flash。诊断页可手动刷新、复制和导出 JSON。随后实机历史确认真实 Station 事件；v0.6.15 据此停用当前 Kernel 的自动关 AP 路径，Station 恢复阈值和 PWM5/PWM4 映射不变。
 
 v0.6.15 根据真实 M1 的历史记录修正 Recovery AP 策略：配置为“连接成功后关闭 Recovery AP”时，Station 在连接后约 32 秒出现真实 `station_down_event`、`station_lost`，随后 MiCO 原生重连；取消该配置后周期性闪烁停止。时间点与 `micoWlanSuspendSoftAP()` 路径高度吻合，但固定 Kernel 的底层冲突机制仍未被直接证明。在 3080B002.023 上现禁用自动关 AP，正常运行不编译该 HAL 调用；已保存的旧开关在 RAM 中被忽略，升级时不写 Flash，用户下次主动保存 Wi-Fi 设置才清除旧标志。Recovery AP 真实状态探测、自愈和 Station 原生重连保持。历史中新增 `ap_auto_close_suppressed`，状态 API 报告支持状态和旧标志。需实机长时间确认 Station 不再周期性掉线及 AP 自愈正常。
-
-Recovery AP 会持续开放，当前热点无密码且 HTTP 管理接口无认证；同一网络上的其他客户端可能访问配置、OTA 等管理操作。后续应单独设计并实测每设备唯一的热点密码、安全配网/恢复方式，以及管理接口认证、会话和 CSRF 防护；本版不更改未经验证的无线安全参数。
-
-v0.6.17 修复 IPv6 手动诊断可能永久停在 `aaaa_primary` 的问题。真实 M1 上，v0.6.16 的固定 Kernel `getaddrinfo(AF_INET6)` 长时间未返回；其内部没有可靠的调用级超时或安全取消接口。本版**完全不调用**该 Kernel IPv6 DNS 入口，数字地址 `getaddrinfo` 实验项明确标为禁用；没有强杀线程。通过当前 Station 缓存的 IPv4 DNS 服务器，按 DNS 协议发送 `www.ustc.edu.cn` AAAA UDP 查询；失败时最多使用阿里公共 DNS IPv4 地址 `223.5.5.5` 查询备用域名 `ipv6.mirrors.ustc.edu.cn`。两次查询各有 3 秒无符号计时上限，不自动重试；解析会核对回复来源、事务 ID、问题名称和类型，处理压缩名称、CNAME、截断、RCODE 与多条 AAAA，并在关闭 Socket 后结束诊断。备用公共 DNS 地址来自[阿里公共 DNS 官方页面](https://alidns.com/)，网络环境可能屏蔽它，失败会保留底层状态。
-
-每个阶段完成后立即在互斥锁下发布状态；`/api/ipv6/status` 的 `stage_results` 依次记录各阶段 `[attempted, done, started_ms, finished_ms, result, errno]`。阶段包括 API 表、Socket、IPv6/IPv4 数字解析、禁用的 Kernel 数字 `getaddrinfo`、AAAA 和可选 TCP。TCP 仍须另行手动确认，直接使用已验证 DNS 回复中的 16 字节地址构造 MiCO `sockaddr_in6`，以非阻塞 `connect`、`select` 和 `SO_ERROR` 检测，连接阶段约 3 秒；不发送数据、不启用 IPv6 MQTT。IPv4 MQTT、Recovery AP、Station 自动重连和配置布局不变。此诊断仍需真实 M1 验证；AAAA 成功仅证明 IPv4 DNS 能取得 IPv6 地址，不证明 IPv6 TCP 可用。
 
 `main()` 创建 3072 字节 housekeeping 线程后返回，由固定 MOC `pre_main()` 删除当前 4096 字节 app_thread，永久线程栈净减少约 1024 字节。housekeeping 只负责低频心跳、内存采样和可选服务懒启动，不调用 WLAN HAL。
 
 启动期只创建 Recovery HTTP、显示、UART 与唯一 Wi-Fi control 线程。Network Health 延迟到 Wi-Fi control 正常运行且 Station 就绪后启动；CPU sampler 至少等待 60 秒，MQTT 仅在已配置启用、Station 就绪、OTA 未运行、堆预留足够且最近栈异常已安静 30 秒后创建；手动点击“启动 MQTT”会保存启用状态，未满足条件时由 housekeeping 稍后自动启动。关键服务启动后堆不足 8192 字节，或 Wi-Fi control 不可用时进入 Recovery 安全模式，不启动这些可选 worker，也不自动重启。OTA worker 创建前要求空闲堆大于 5120 字节栈加 4096 字节安全余量；不足时 HTTP 503。`/api/system/stats` 报告启动期/运行期最低空闲堆、阶段、安全模式与栈溢出通知计数。Wi-Fi 故障通知只计数，由唯一控制线程处理 WLAN HAL。GCC `-fstack-usage` 和 ELF 堆区域预算是辅助静态检查，不能替代实机栈/堆观测。
 
-恢复热点名称由设备 Wi-Fi MAC 的最后 3 字节生成，格式为 **`OpenM1-XXXXXX`**，例如 MAC `34:EA:34:12:AB:CD` 对应 `OpenM1-12ABCD`。若 MAC 读取结果无效，则使用 `OpenM1-RECOVERY` 并输出故障日志。热点开放、无密码，地址固定为 `192.168.4.1/24`，DHCP Server 开启，HTTP 监听 TCP 80。**每次重启先启动恢复热点、HTTP 和 OTA；只有用户保存凭据并启用开机自动连接后，才会尝试连接家庭 Wi-Fi。** Wi-Fi 与 MQTT 密码保存在本机 MiCO 参数 Flash，未加密，不是保险库；GET API 与日志不返回密码。不要在不可信网络暴露此无认证管理界面。
+恢复热点名称由设备 Wi-Fi MAC 的最后 3 字节生成，格式为 **`OpenM1-XXXXXX`**，例如 MAC `34:EA:34:12:AB:CD` 对应 `OpenM1-12ABCD`。若 MAC 读取结果无效，则使用 `OpenM1-RECOVERY` 并输出故障日志。热点默认开放，可在网络页设置 8～63 字节密码并于下次重启请求 WPA2；地址固定为 `192.168.4.1/24`，DHCP Server 开启，HTTP 监听 TCP 80。**每次重启先启动恢复热点、HTTP 和 OTA；只有用户保存凭据并启用开机自动连接后，才会尝试连接家庭 Wi-Fi。** Wi-Fi 与 MQTT 密码保存在本机 MiCO 参数 Flash，未加密，不是保险库；GET API 与日志不返回密码。不要在不可信网络暴露此无认证管理界面。
 
-## v0.6.18：手动 IPv6 深度诊断
+## v0.6.19：MQTT SOCKS5 与 Recovery AP 密码
 
-本版依据 v0.6.17 实机记录开展诊断：IPv6 Socket 创建成功；MiCO `inet_pton()` 对 IPv4、IPv6 数字地址均返回 0 且未写入输出；IPv4 UDP AAAA 得到合法 IPv6 地址；IPv6 TCP 对该地址超时约 3 秒，而同 LAN 的 Debian 主机经有线网络可访问该服务。这些证据尚不能证明 M1 Wi-Fi Station 已取得 IPv6 地址或默认路由，也不能证明 MOC Kernel 的 IPv6 数据路径可用。IPv6 MQTT 继续关闭。
+已移除 v0.6.14～v0.6.18 的全部原生 IPv6 实验诊断、相关线程与 API。M1 本地 MQTT 仅建立 IPv4 TCP；开启 SOCKS5 后，由 IPv4 代理对 IPv4、域名或 IPv6 Broker 建立隧道。IPv6 字面量只在应用层编码为 SOCKS5 地址，设备不创建 IPv6 Socket。代理关闭时原有 IPv4 MQTT 直连行为保留，代理参数仍存储。独立的代理测试只建立目标 TCP 隧道，然后关闭，不发送 MQTT 凭据。详情见 [MQTT 代理说明](docs/mqtt-proxy.md)。
 
-新增手动 `POST /api/ipv6/probe/deep`，请求体必须为 `{"confirm_ipv6_deep":true}`；`GET /api/ipv6/deep/status` 返回原始 Socket、bind、getsockname、ioctl、connect、select、getsockopt 与耗时。每次实验创建独立临时 Socket，并在结束时关闭。默认 IPv4 对照目标是 `223.5.5.5:53`，只有实际连接成功时才能当作已验证基准；IPv6 默认使用已校验的 AAAA 回复。`SO_ERROR` 只有在 `getsockopt()` 成功后才有数值，否则为 `null`。`connect()` 返回 -1 且 errno 为 0 时保留原始值并标记 `kernel_errno_unavailable`。通配绑定 `[::]:0` 的成功和返回的 `::` **不代表** Station IPv6 地址。固定 MOC API 表没有 `micoWlanGetIP6Status()` 入口，故 `ipv6_interface_query=unavailable`；无法据此断言没有 IPv6 地址或路由。
-
-可选受控 LAN 对照：在 Debian 上选用仅供测试的两个端口，例如 18080（IPv4）与 18081（IPv6）。先用 `ip -6 addr` 查出 Debian 当前全球单播地址，再分别运行 `python3 -m http.server 18080 --bind 10.10.1.118` 和 `python3 -m http.server 18081 --bind <Debian 当前 IPv6 地址>`。在 Debian 防火墙上仅允许 M1 的 IPv4 地址访问 18080，并仅允许本 LAN 的 IPv6 前缀访问 18081；例如已有 nftables `inet` input 链时，加入 `ip saddr 10.10.1.124 tcp dport 18080 accept` 和 `ip6 saddr <LAN IPv6 前缀>/64 tcp dport 18081 accept`，同时确保其他来源对这两个端口被拒绝。先从同网段另一客户端分别连通两个监听端口，确认服务与防火墙有效。固件只执行 TCP 建连，不发送 HTTP 请求或敏感数据。
-
-受控目标只在构建时设置，不通过未认证 HTTP 传入，也不写入 Flash。例如在运行 `scripts/build_recovery.sh` 前导出 `OPENM1_DIAG_IPV4_TARGET=10.10.1.118`、`OPENM1_DIAG_IPV4_PORT=18080`、`OPENM1_DIAG_LAN_IPV6_HEX=<当前 Debian IPv6 的 32 位十六进制展开地址>`、`OPENM1_DIAG_LAN_IPV6_PORT=18081`。IPv6 值须为 32 个十六进制数字，不含冒号；可用 Debian 命令 `python3 -c 'import ipaddress,sys; print(ipaddress.IPv6Address(sys.argv[1]).exploded.replace(":",""))' <地址>` 生成。不要将个人公网 IPv6 地址提交到仓库。构建前确认 IPv4/IPv6 端口均可连接，并在实机结果中记录是有线/无线、目标端口和防火墙设置；否则不得以对照结果推断协议栈差异。
-
-实机验收顺序：先确认 Recovery AP、网页、Wi-Fi、MQTT/HA、传感器与空闲堆正常；执行基础检测，等待结束并复制 JSON；在 OTA 空闲时执行深度对照；检查 bind 返回、`getsockname()` 地址、两种 TCP 的每个原始返回值和 `SO_ERROR` 是否真的查询、连接后的 IPv6 源地址以及栈溢出计数；最后再测试 OTA、Station 重连和 Recovery AP 自愈。只有 IPv6 TCP 实际成功且源地址证据可信时，才值得规划原生 IPv6 MQTT；本固件不会自动运行这些实验。
+配置从 v3 迁移至 v4，保留 Broker、Wi-Fi、HA、亮度、主题与 Client ID。Recovery AP 密码独立于家庭 Wi-Fi 密码；设置或清除后只写参数 Flash，下次重启才请求新 AP 安全模式，AP 自愈沿用本次启动的密码。固定 SDK 的 `network_InitTypeDef_st.wifi_key` 支持提供 Soft AP 密码，但 MK3080B WPA2 广播、客户端认证及 AP+STA 稳定性尚需真实设备验证。管理页面自身没有登录认证。
 
 ## 页面与接口
 
@@ -64,7 +50,7 @@ v0.6.17 修复 IPv6 手动诊断可能永久停在 `aaaa_primary` 的问题。�
 
 「API 调试」提供固定同源路由目录，包含中文说明、方法/类型筛选、`/api/logs` 的 after 序号、POST JSON 编辑与语法校验。请求只由点击执行发出，一次只执行一个；结果显示 HTTP 状态、耗时、完成时间和 Content-Type，JSON 缩进，非 JSON 原文保留。复制优先用 Clipboard API，普通 HTTP 页面会退回 textarea 复制；结果文本始终可手动选中。调试台不会保存编辑框中的 Wi-Fi 或 MQTT 密码，也不会自动批量调用接口。修改配置、断网、清空日志、切换波特率、擦除 OTA_TEMP 及重启需要确认。OTA 上传仍须在「固件升级」页选择文件并完成准备、上传、Flash 回读和校验。
 
-RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.18-log.txt`，系统页“复制日志”使用同一完整文本流；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
+RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会返回 `cursor_reset:true` 并从当前最旧记录开始；`GET /api/logs/download` 流式下载 `OpenM1-v0.6.19-log.txt`，系统页“复制日志”使用同一完整文本流；`POST /api/logs/clear` 清空记录但保持本次开机序号递增。`GET /api/system/stats` 的 `log` 对象提供容量、当前条数、覆盖次数、丢弃次数和 RAM 占用。日志轮询及其他状态轮询不会延长 60 秒救援窗口；首页首次打开、日志下载及 Wi-Fi/OTA/重启操作可单次延长 15 秒。
 
 | 路由 | 功能 |
 | --- | --- |
@@ -78,9 +64,6 @@ RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会�
 | `POST /api/reboot` | 受控重启 |
 | `GET /api/wifi/status` | 真实 AP 观察状态、自愈计数、Station 原生重连与受控重置状态、SSID、IP、RSSI 和稳定性计数；不含密码 |
 | `GET /api/wifi/history` | 最近 32 次 Wi-Fi、AP、网络健康与显示目标变化；RAM 环形记录，只读 |
-| `GET /api/ipv6/status` | 最近一次手动 IPv6 能力检测结果及底层错误；只读 |
-| `POST /api/ipv6/probe` | Station 联网后手动检测 IPv6 Socket、地址解析与国内域名 AAAA；不连接外部 TCP |
-| `POST /api/ipv6/probe/tcp` | 明确确认并提交 `{"confirm_ipv6_tcp":true}` 后，对解析到的中科大 IPv6 地址执行约 3 秒 TCP 连接；不启用 IPv6 MQTT |
 | `GET /api/wifi/settings` | 已保存 SSID、是否有凭据及两个开关；不含密码 |
 | `POST /api/wifi/settings` | 保存/清除开机 Wi-Fi 设置；只在用户提交时写参数 Flash |
 | `GET /api/system/stats` | 估算 CPU 负载、MiCO 堆信息和裸 Flash 分区元数据 |
@@ -88,6 +71,10 @@ RAM 日志接口：`GET /api/logs?after=0` 最多返回 8 条，过旧游标会�
 | `POST /api/wifi/disconnect` | 只断开 Station，保留恢复热点 |
 | `POST /api/wifi/scan` | 启动一次异步扫描；OTA 期间拒绝 |
 | `GET /api/wifi/scan` | 扫描状态和最多 20 个最强 SSID，含 RSSI、安全类型和信道 |
+| `GET /api/wifi/ap/config`、`POST /api/wifi/ap/config` | 查看热点安全状态；设置密码需两次一致，清除需双重确认；下次重启生效 |
+| `GET /api/mqtt/proxy/status` | 代理模式、连接阶段和错误；不返回密码 |
+| `POST /api/mqtt/proxy/config` | 保存代理开关、地址、端口与独立认证信息 |
+| `POST /api/mqtt/proxy/test` | 手动测试 SOCKS5 CONNECT，不发送 MQTT 凭据 |
 | `GET /api/mqtt/status` | MQTT 状态和非秘密配置；仅返回 `password_set` |
 | `POST /api/mqtt/config` | 保存 Broker、认证、主题和发布周期配置 |
 | `POST /api/mqtt/start`、`/api/mqtt/stop`、`/api/mqtt/test` | 启动、停止和尝试连接 Broker |
@@ -144,7 +131,7 @@ Home Assistant 自动发现只通过 MQTT 实现。后端仅在 Broker 已配置
 
 完整 MOC OTA 由 Kernel、填充到 `0x75000`、8 字节 APP 头、APP payload、末尾 16 字节 raw MD5 组成。上传或 URL 下载时使用 2048 字节静态缓冲流式写入 `MICO_PARTITION_OTA_TEMP`，然后从 Flash 回读长度、两份 APP CRC、payload CRC 和整个 OTA（不含尾部 MD5）的 MD5；另外计算 boot table 所需 CRC16。验证成功才调用 `mico_ota_switch_to_new_fw(total_size - 16, boot_crc16)`，发送 HTTP 成功响应，等待两秒后 `MicoSystemReboot()`。任一校验失败不写升级标志、不重启。最大 OTA 文件限制为分区实际长度与 `0xB5000` 两者较小值。
 
-`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.18 的本地 OTA、长期 Station 与 MQTT 稳定性已通过实机验证。**
+`reference/zM1@MK3080B@moc.ota.bin` 保持不变，构建产物仍附带此手工恢复参考文件。CI 不连接真实设备。若新固件无法启动或 Recovery 不可用，可能需要拆机和物理刷写；**静态 `safe_to_flash` 不代表 v0.6.19 的本地 OTA、长期 Station 与 MQTT 稳定性已通过实机验证。**
 
 ## 构建与验证
 
@@ -162,9 +149,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.6.18@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.6.19@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.6.18.bin
+  --app dist/OpenM1-v0.6.19.bin
 ```
 
-GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.18`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.18 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。
+GitHub Actions 在推送 `main` 或手动触发时构建 Artifact `OpenM1-v0.6.19`，包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号、校验报告、UART 与 Wi-Fi 图标逆向报告及构建日志。首次使用 v0.6.19 时应先核对 Artifact 与 manifest，再进行可恢复的实机测试。

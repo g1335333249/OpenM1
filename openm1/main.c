@@ -12,7 +12,6 @@
 #include "openm1_log.h"
 #include "worker_retry_logic.h"
 #include "button_manager.h"
-#include "ipv6_diagnostic.h"
 
 /* Implemented by the pinned SDK's MiCO/net/mocIP/mico/mico_socket.c. */
 extern char *sethostname(char *name);
@@ -127,11 +126,11 @@ int main(void)
     result=openm1_log_init();
     if (result!=kNoErr) printf("BOOT: RAM logger unavailable: %d\r\n",result);
     openm1_log_info("BOOT","app_thread stack configured = %lu",(unsigned long)app_stack_size);
-    openm1_log_info("BOOT","OpenM1 v0.6.18");
+    openm1_log_info("BOOT","OpenM1 v0.6.19");
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.18\r\n"
+           "Version: 0.6.19\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -185,10 +184,20 @@ int main(void)
         printf("DEVICE: DHCP hostname setup unavailable\r\n");
     openm1_log_info("RECOVERY","SSID = %s",recovery_ssid);
 
+    result=config_store_init();
+    boot_log_init_error("config",result);
+    openm1_log_info("BOOT","config init result = %d",result);
     printf("RECOVERY: starting SoftAP\r\n");
     memset(&wifi_config, 0, sizeof(wifi_config));
     wifi_config.wifi_mode = Soft_AP;
     snprintf(wifi_config.wifi_ssid, sizeof(wifi_config.wifi_ssid), "%s", recovery_ssid);
+    {
+        openm1_config_t startup_config;
+        config_store_get(&startup_config);
+        wifi_manager_set_boot_ap_password(startup_config.recovery_ap_password);
+        memcpy(wifi_config.wifi_key,startup_config.recovery_ap_password,
+               sizeof(startup_config.recovery_ap_password));
+    }
     memcpy(wifi_config.local_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
     memcpy(wifi_config.net_mask, "255.255.255.0", sizeof("255.255.255.0"));
     memcpy(wifi_config.gateway_ip_addr, RECOVERY_IP, sizeof(RECOVERY_IP));
@@ -224,16 +233,11 @@ int main(void)
     }
     printf("BOOT: phase 1 recovery ready\r\n");
     boot_heap_log("after HTTP");
-    result=config_store_init();
-    boot_log_init_error("config",result);
-    openm1_log_info("BOOT","config init result = %d",result);
     result=button_manager_init();
     boot_log_init_error("button manager",result);
     wifi_result=wifi_manager_init();
     boot_log_init_error("Wi-Fi manager",wifi_result);
     openm1_log_info("BOOT","Wi-Fi manager init result = %d",wifi_result);
-    result=ipv6_diagnostic_init(); /* State only; no IPv6 API runs at boot. */
-    boot_log_init_error("IPv6 diagnostic",result);
     if (wifi_result==kNoErr)
         wifi_manager_set_initial_ap_state(ap_result==kNoErr);
     system_stats_set_boot_phase("core");

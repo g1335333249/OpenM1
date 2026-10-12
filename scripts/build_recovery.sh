@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SDK_COMMIT=9b09de78164940ff3876d2053f8e7dd42ca2b8ba
 KERNEL=mico-os/resources/moc_kernel/3080B/kernel.bin
-PREFIX=OpenM1-v0.6.18
+PREFIX=OpenM1-v0.6.19
 OTA="dist/$PREFIX@MK3080B@moc.ota.bin"
 if [[ "$(uname -s)" == Darwin ]]; then BUILD_HOST_OS=OSX; else BUILD_HOST_OS=Linux64; fi
 TOOL=".micoder/compiler/arm-none-eabi-5_4-2016q2-20160622/$BUILD_HOST_OS/bin"
@@ -16,16 +16,14 @@ node tests/test_api_console.js
 node tests/test_button_web.js
 python3 tests/test_v014_diagnostics_static.py
 python3 tests/test_v015_ap_policy_static.py
-python3 tests/test_v016_ipv6_static.py
-python3 tests/test_v017_ipv6_static.py
-python3 tests/test_v018_ipv6_static.py
-cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_v018_tcp_logic.c openm1/ipv6_probe_logic.c -o /tmp/openm1-v018-tcp-test
-/tmp/openm1-v018-tcp-test
-cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_dns_aaaa_logic.c openm1/dns_aaaa_logic.c -o /tmp/openm1-dns-aaaa-test
-/tmp/openm1-dns-aaaa-test
+python3 tests/test_v019_static.py
 node tests/test_v014_diagnostics_web.js
-cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_ipv6_probe_logic.c openm1/ipv6_probe_logic.c -o /tmp/openm1-ipv6-probe-test
-/tmp/openm1-ipv6-probe-test
+cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_socks5_protocol.c openm1/socks5_protocol.c -o /tmp/openm1-socks5-test
+/tmp/openm1-socks5-test
+cc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_mqtt_proxy.c openm1/mqtt_proxy.c openm1/socks5_protocol.c -pthread -o /tmp/openm1-mqtt-proxy-test
+/tmp/openm1-mqtt-proxy-test
+cc -std=c99 -Wall -Wextra -Werror -Iopenm1 tests/test_ap_security.c openm1/ap_security.c -o /tmp/openm1-ap-security-test
+/tmp/openm1-ap-security-test
 python3 tests/test_v013_factory_reset_static.py
 python3 tests/test_v063_static.py
 python3 tests/test_v063_safety.py
@@ -68,7 +66,7 @@ cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_m1_display_n
 /tmp/openm1-display-network-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_network_health.c openm1/network_health_state.c -o /tmp/openm1-network-health-test
 /tmp/openm1-network-health-test
-cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_config_migration.c openm1/config_store.c -o /tmp/openm1-config-migration-test
+cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_config_migration.c openm1/config_store.c openm1/ap_security.c -o /tmp/openm1-config-migration-test
 /tmp/openm1-config-migration-test
 cc -std=c99 -Wall -Wextra -Werror -Itests/stubs -Iopenm1 tests/test_wifi_settings.c openm1/wifi_settings.c openm1/json_min.c -o /tmp/openm1-wifi-settings-test
 /tmp/openm1-wifi-settings-test
@@ -123,18 +121,22 @@ for symbol in m1_uart_init m1_uart_worker m1_uart_send_init_command m1_uart_requ
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
-for symbol in button_manager_init button_manager_note_long_press button_manager_tick button_manager_status_json ipv6_diagnostic_init ipv6_diagnostic_start wifi_manager_history_note wifi_manager_history_record_json; do
+for symbol in button_manager_init button_manager_note_long_press button_manager_tick button_manager_status_json wifi_manager_history_note wifi_manager_history_record_json; do
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
-for symbol in wifi_manager_start_scan scan_complete wifi_manager_apply_boot_settings wifi_manager_save_settings wifi_control_worker wifi_ap_restore_backoff_ms system_stats_init system_stats_json openm1_log_init openm1_log_json openm1_log_clear openm1_http_explicit_recovery_activity mqtt_manager_init MQTTClientInit MQTTConnect MQTTPublish mqtt_manager_set_discovery homeassistant_publish ha_policy_can_enable; do
+for symbol in wifi_manager_start_scan scan_complete wifi_manager_apply_boot_settings wifi_manager_save_settings wifi_control_worker wifi_ap_restore_backoff_ms system_stats_init system_stats_json openm1_log_init openm1_log_json openm1_log_clear openm1_http_explicit_recovery_activity mqtt_manager_init mqtt_proxy_open socks5_connect_request ap_security_password_valid MQTTClientInit MQTTConnect MQTTPublish mqtt_manager_set_discovery homeassistant_publish ha_policy_can_enable; do
   if ! grep -Eq "[[:space:]]${symbol}$" dist/symbols.txt; then echo "[FAIL] missing $symbol"; exit 1; fi
   echo "[PASS] $symbol"
 done
+if "$TOOL/arm-none-eabi-strings" "dist/$PREFIX.elf" | grep -F '/api/ipv6/' >/dev/null; then
+  echo '[FAIL] removed IPv6 diagnostic route remains in firmware' >&2
+  exit 1
+fi
 grep -Fq 'mico_notify_WIFI_SCAN_ADV_COMPLETED' openm1/wifi_manager.c
 grep -Fq 'micoWlanStartScanAdv()' openm1/wifi_manager.c
 echo '[PASS] SDK advanced scan callback and API'
-for route in /api/logs /api/logs/download /api/logs/clear /api/ota/prepare /api/wifi/status /api/wifi/history /api/ipv6/status /api/ipv6/deep/status /api/ipv6/probe /api/ipv6/probe/deep /api/wifi/settings /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/system/stats /api/sensors /api/uart/status /api/uart/raw /api/button/status /api/uart/config /api/uart/init /api/uart/sensor-request /api/display/status /api/display/brightness /api/display/network-test /api/network/health /api/ota/status /api/ota/upload /api/ota/url /api/reboot /api/mqtt/status /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
+for route in /api/logs /api/logs/download /api/logs/clear /api/ota/prepare /api/wifi/status /api/wifi/history /api/wifi/settings /api/wifi/connect /api/wifi/disconnect /api/wifi/scan /api/system/stats /api/sensors /api/uart/status /api/uart/raw /api/button/status /api/uart/config /api/uart/init /api/uart/sensor-request /api/display/status /api/display/brightness /api/display/network-test /api/network/health /api/ota/status /api/ota/upload /api/ota/url /api/reboot /api/mqtt/status /api/mqtt/proxy/status /api/mqtt/proxy/config /api/mqtt/proxy/test /api/wifi/ap/config /api/mqtt/config /api/mqtt/start /api/mqtt/stop /api/mqtt/test /api/homeassistant/status /api/homeassistant/discovery; do
   if ! "$TOOL/arm-none-eabi-strings" "dist/$PREFIX.elf" | grep -F "$route" >/dev/null; then echo "[FAIL] missing route $route"; exit 1; fi
   echo "[PASS] $route"
 done
@@ -148,7 +150,7 @@ if grep -En 'MICO_STDIO_UART|/api/uart/send' openm1/m1_uart.c openm1/m1_sensor.c
 fi
 echo '[PASS] UART TX restricted to sensor request and validated display frames'
 cp docs/zm1-uart-reverse.md dist/zm1-uart-reverse.md
-cp docs/zm1-wifi-icon-reverse.md docs/mqtt.md docs/homeassistant.md dist/
+cp docs/zm1-wifi-icon-reverse.md docs/mqtt.md docs/mqtt-proxy.md docs/homeassistant.md dist/
 python3 tools/analyze_zm1_uart.py --reference 'reference/zM1@MK3080B@moc.ota.bin' --output dist/uart-protocol-report.txt
 python3 tools/kernel_report.py --sdk-kernel "$KERNEL" --output dist/kernel-report.txt
 python3 tools/make_ota.py --app "dist/$PREFIX.bin" --sdk-kernel "$KERNEL" --output "$OTA"

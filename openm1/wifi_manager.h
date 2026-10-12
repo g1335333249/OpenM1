@@ -26,6 +26,9 @@ typedef enum {
 
 OSStatus wifi_manager_init(void);
 void wifi_manager_set_initial_ap_state(int started);
+void wifi_manager_set_boot_ap_password(const char *password);
+int wifi_manager_ap_password_active(void);
+int wifi_manager_ap_password_pending(void);
 void wifi_manager_note_recovery_activity(void);
 OSStatus wifi_manager_apply_boot_settings(void);
 void wifi_manager_settings_json(char *out,size_t capacity);

@@ -10,7 +10,8 @@
 #include "openm1_log.h"
 #include "http_activity.h"
 #include "button_manager.h"
-#include "ipv6_diagnostic.h"
+#include "config_store.h"
+#include "ap_security.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -167,7 +168,7 @@ static int read_small_body(int fd,const char *request,int start,size_t initial,
 static void send_log_download(int fd)
 {
     static const char header[]="HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
-        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.18-log.txt\"\r\n"
+        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.19-log.txt\"\r\n"
         "Connection: close\r\nCache-Control: no-store\r\n\r\n";
     openm1_log_status_t status;
     openm1_log_record_t record;
@@ -176,7 +177,7 @@ static void send_log_download(int fd)
     int n;
     openm1_log_status(&status);
     if (recovery_send_all(fd,header,sizeof(header)-1u)) return;
-    n=snprintf(line,sizeof(line),"OpenM1 v0.6.18\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
+    n=snprintf(line,sizeof(line),"OpenM1 v0.6.19\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
                recovery_hostname(),(unsigned long)mico_rtos_get_time());
     if (n>0 && n<(int)sizeof(line) && recovery_send_all(fd,line,(size_t)n)) return;
     if (!status.available) {
@@ -290,10 +291,17 @@ static void handle_client(int fd)
             send_wifi_history(fd);
         } else if (!strcmp(path,"/api/wifi/status")) {
             wifi_manager_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
-        } else if (!strcmp(path,"/api/ipv6/status")) {
-            ipv6_diagnostic_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
-        } else if (!strcmp(path,"/api/ipv6/deep/status")) {
-            ipv6_diagnostic_deep_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/wifi/ap/config")) {
+            openm1_config_t config;
+            config_store_get(&config);
+            snprintf(json,sizeof(json),"{\"ssid\":\"%s\",\"password_set\":%s,"
+                "\"active_password_set\":%s,\"pending_restart\":%s,\"security\":\"%s\","
+                "\"hardware_verified\":false}",recovery_ssid(),
+                config.recovery_ap_password[0]?"true":"false",
+                wifi_manager_ap_password_active()?"true":"false",
+                wifi_manager_ap_password_pending()?"true":"false",
+                wifi_manager_ap_password_active()?"wpa2_requested":"open");
+            recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/wifi/scan")) {
             send_wifi_scan(fd);
         } else if (!strcmp(path,"/api/wifi/settings")) {
@@ -302,6 +310,8 @@ static void handle_client(int fd)
             system_stats_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/mqtt/status")) {
             mqtt_manager_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/mqtt/proxy/status")) {
+            mqtt_manager_proxy_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/homeassistant/status")) {
             homeassistant_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/display/status")) {
@@ -310,7 +320,7 @@ static void handle_client(int fd)
             network_health_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.18\",\"version\":\"0.6.18\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.19\",\"version\":\"0.6.19\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),recovery_hostname(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -325,40 +335,6 @@ static void handle_client(int fd)
         goto done;
     }
     if (strcmp(method,"POST")) { recovery_send_json(fd,405,"{\"message\":\"Method not allowed\"}"); goto done; }
-    if (!strcmp(path,"/api/ipv6/probe") || !strcmp(path,"/api/ipv6/probe/tcp") ||
-        !strcmp(path,"/api/ipv6/probe/deep")) {
-        int probe_result;
-        int deep=!strcmp(path,"/api/ipv6/probe/deep");
-        int tcp=!strcmp(path,"/api/ipv6/probe/tcp");
-        if (tcp || deep) {
-            char confirmation[65]; json_min_field_t field[1];
-            int parsed;
-            if (!seen || !read_small_body(fd,request,body_start,body_len,length,
-                                          confirmation,sizeof(confirmation))) {
-                recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"IPv6 TCP confirmation required\"}"); goto done;
-            }
-            parsed=json_min_parse(confirmation,length,field,1);
-            if (parsed!=1 || strcmp(field[0].key,deep?"confirm_ipv6_deep":"confirm_ipv6_tcp") ||
-                field[0].kind!='b' || strcmp(field[0].value,"true")) {
-                recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"Explicit IPv6 TCP confirmation required\"}"); goto done;
-            }
-        } else if ((seen && length) || body_len) {
-            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"Request body is not allowed\"}"); goto done;
-        }
-        probe_result=deep?ipv6_diagnostic_start_deep():
-            tcp?ipv6_diagnostic_start_tcp():ipv6_diagnostic_start();
-        if (!probe_result) recovery_send_json(fd,202,"{\"ok\":true,\"state\":\"running\"}");
-        else if (probe_result==-2 || probe_result==-5)
-            recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"OTA busy or IPv6 probe already running\"}");
-        else if (probe_result==-3)
-            recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"Station IP required for AAAA DNS test\"}");
-        else if (probe_result==-7)
-            recovery_send_json(fd,429,"{\"ok\":false,\"message\":\"Please wait 30 seconds before another IPv6 probe\"}");
-        else if (probe_result==-8)
-            recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"IPv6 TCP experiment is disabled in this build\"}");
-        else recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"IPv6 probe unavailable or insufficient heap\"}");
-        goto done;
-    }
     if (!strcmp(path,"/api/logs/clear")) {
         if ((seen && length) || body_len) recovery_send_json(fd,400,"{\"error\":\"Request body is not allowed\"}");
         else { openm1_log_clear(); recovery_send_json(fd,200,"{\"ok\":true}"); }
@@ -431,6 +407,60 @@ static void handle_client(int fd)
         else if (result==-2) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"请先关闭 Home Assistant 自动发现，再修改主题或发现前缀。\"}");
         else if (result==-3) recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"配置保存失败或正在升级固件。\"}");
         else recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"MQTT 配置字段或长度无效。\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/mqtt/proxy/config")) {
+        static char body[513];
+        int result;
+        if (!seen || !read_small_body(fd,request,body_start,body_len,length,body,sizeof(body))) {
+            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"代理配置请求无效。\"}");goto done;
+        }
+        result=mqtt_manager_proxy_configure(body,length);
+        memset(body,0,sizeof(body));
+        if (!result) recovery_send_json(fd,200,"{\"ok\":true}");
+        else recovery_send_json(fd,result==-2?503:400,"{\"ok\":false,\"message\":\"代理配置无效或保存失败。\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/mqtt/proxy/test")) {
+        int result;
+        if ((seen && length) || body_len) {recovery_send_json(fd,400,"{\"ok\":false}");goto done;}
+        json[0]=0;
+        result=mqtt_manager_proxy_test(json,sizeof(json));
+        if (result==-2) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"网络、内存或 OTA 状态不允许测试。\"}");
+        else if (result==-1 && !json[0]) recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"请先启用代理并配置 Broker。\"}");
+        else recovery_send_json(fd,200,json);
+        goto done;
+    }
+    if (!strcmp(path,"/api/wifi/ap/config")) {
+        char body[257]; json_min_field_t fields[4];
+        const json_min_field_t *password,*confirmation,*clear,*clear_confirmation;
+        openm1_config_t config;
+        int count;
+        if (!seen || !read_small_body(fd,request,body_start,body_len,length,body,sizeof(body))) {
+            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"热点密码请求无效。\"}");goto done;
+        }
+        count=json_min_parse(body,length,fields,4);
+        password=json_min_find(fields,count,"password");
+        confirmation=json_min_find(fields,count,"confirm_password");
+        clear=json_min_find(fields,count,"clear_password");
+        clear_confirmation=json_min_find(fields,count,"confirm_clear");
+        if (count!=2 || (clear && (password || confirmation || !clear_confirmation || clear->kind!='b' ||
+            clear_confirmation->kind!='b' || strcmp(clear->value,"true") ||
+            strcmp(clear_confirmation->value,"true"))) ||
+            (!clear && (clear_confirmation || !password || !confirmation || password->kind!='s' ||
+             confirmation->kind!='s' || strcmp(password->value,confirmation->value) ||
+             !ap_security_password_valid(password->value)))) {
+            memset(body,0,sizeof(body));
+            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"密码必须为 8–63 字节可打印 ASCII，且两次输入一致；清除需单独确认。\"}");goto done;
+        }
+        config_store_get(&config);
+        if (clear) config.recovery_ap_password[0]=0;
+        else snprintf(config.recovery_ap_password,sizeof(config.recovery_ap_password),"%s",password->value);
+        memset(body,0,sizeof(body));
+        memset(fields,0,sizeof(fields));
+        if (config_store_save(&config)==kNoErr)
+            recovery_send_json(fd,200,"{\"ok\":true,\"message\":\"已保存，下次重启生效。\"}");
+        else recovery_send_json(fd,503,"{\"ok\":false,\"message\":\"保存失败或 OTA 正在运行。\"}");
         goto done;
     }
     if (!strcmp(path,"/api/mqtt/start") || !strcmp(path,"/api/mqtt/test")) {

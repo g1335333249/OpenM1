@@ -1,5 +1,6 @@
 #include "config_store.h"
 #include "recovery.h"
+#include "ap_security.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -28,6 +29,19 @@ typedef struct {
     uint8_t mqtt_enabled,ha_enabled,reserved[2];
     uint8_t brightness_level,last_nonzero_brightness,display_reserved[2];
 } openm1_config_v2_t;
+/* Exact v0.6.18 app-data prefix. The SDK reads the new length, so validate
+ * the old CRC over this prefix before writing a v4 image. */
+typedef struct {
+    uint32_t magic;
+    uint16_t version,size;
+    uint32_t crc32;
+    char host[129],username[65],password[129],client_id[65],base_topic[129],discovery_prefix[65];
+    uint16_t port,publish_interval;
+    uint8_t mqtt_enabled,ha_enabled,reserved[2];
+    uint8_t brightness_level,last_nonzero_brightness,display_reserved[2];
+    char wifi_ssid[32],wifi_password[64];
+    uint8_t wifi_auto_connect,ap_disable_after_sta_connected,wifi_reserved[2];
+} openm1_config_v3_t;
 
 static uint32_t crc32_bytes(const void *data, size_t length)
 {
@@ -56,6 +70,7 @@ void config_store_defaults(openm1_config_t *config)
     config->publish_interval=5;
     config->brightness_level=4;
     config->last_nonzero_brightness=4;
+    config->proxy_port=1080;
     snprintf(config->discovery_prefix,sizeof(config->discovery_prefix),"homeassistant");
     snprintf(config->client_id,sizeof(config->client_id),"%s",ssid);
     snprintf(config->base_topic,sizeof(config->base_topic),"openm1/%s",suffix?suffix+1:"RECOVERY");
@@ -78,8 +93,25 @@ static int config_valid(const openm1_config_t *config)
            config->last_nonzero_brightness<=4 &&
            config->wifi_ssid[31]==0 && config->wifi_password[63]==0 &&
            config->wifi_auto_connect<=1 && config->ap_disable_after_sta_connected<=1 &&
+           config->proxy_enabled<=1 && config->proxy_port>0 &&
+           config->proxy_host[128]==0 && config->proxy_username[64]==0 &&
+           config->proxy_password[128]==0 && config->recovery_ap_password[63]==0 &&
+           (!config->recovery_ap_password[0] || ap_security_password_valid(config->recovery_ap_password)) &&
            (!config->ap_disable_after_sta_connected ||
             (config->wifi_auto_connect && config->wifi_ssid[0]));
+}
+static int config_v3_valid(const openm1_config_v3_t *old)
+{
+    return old->magic==OPENM1_CONFIG_MAGIC && old->version==3 &&
+        old->size==sizeof(*old) && old->crc32==crc32_bytes(old,sizeof(*old)) &&
+        old->host[128]==0 && old->username[64]==0 && old->password[128]==0 &&
+        old->client_id[64]==0 && old->base_topic[128]==0 &&
+        old->discovery_prefix[64]==0 && old->wifi_ssid[31]==0 &&
+        old->wifi_password[63]==0 && old->port>0 &&
+        old->publish_interval>=2 && old->publish_interval<=300 &&
+        old->brightness_level<=4 && old->last_nonzero_brightness>=1 &&
+        old->last_nonzero_brightness<=4 && old->wifi_auto_connect<=1 &&
+        old->ap_disable_after_sta_connected<=1;
 }
 static int config_v2_valid(const openm1_config_v2_t *old)
 {
@@ -111,11 +143,17 @@ OSStatus config_store_init(void)
     if (err!=kNoErr) return err;
     if (config_valid(saved) && !(saved->host[0]==0 &&
         !strcmp(saved->client_id,RECOVERY_FALLBACK_SSID))) config_cache=*saved;
+    else if (config_v3_valid((const openm1_config_v3_t *)saved)) {
+        config_store_defaults(&config_cache);
+        memcpy(&config_cache,saved,sizeof(openm1_config_v3_t));
+        migrate=1;
+        printf("CONFIG: migrating v3 settings to v4\r\n");
+    }
     else if (config_v2_valid((const openm1_config_v2_t *)saved)) {
         config_store_defaults(&config_cache);
         memcpy(&config_cache,saved,sizeof(openm1_config_v2_t));
         migrate=1;
-        printf("CONFIG: migrating v2 MQTT/HA/brightness settings to v3\r\n");
+        printf("CONFIG: migrating v2 MQTT/HA/brightness settings to v4\r\n");
     }
     else if (config_v1_valid((const openm1_config_v1_t *)saved)) {
         config_store_defaults(&config_cache);
@@ -124,7 +162,7 @@ OSStatus config_store_init(void)
         config_cache.brightness_level=4;
         config_cache.last_nonzero_brightness=4;
         migrate=1;
-        printf("CONFIG: migrating v1 MQTT/HA settings to v3\r\n");
+        printf("CONFIG: migrating v1 MQTT/HA settings to v4\r\n");
     }
     else {
         config_store_defaults(&config_cache);

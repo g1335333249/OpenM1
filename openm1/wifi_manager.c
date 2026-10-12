@@ -43,6 +43,18 @@ static wifi_station_desired_t desired_station;
 static mico_mutex_t status_mutex;
 static mico_thread_t wifi_control_thread;
 static int manager_ready,control_worker_created;
+static char boot_ap_password[64];
+void wifi_manager_set_boot_ap_password(const char *password)
+{
+    snprintf(boot_ap_password,sizeof(boot_ap_password),"%s",password?password:"");
+}
+int wifi_manager_ap_password_active(void) { return boot_ap_password[0]!=0; }
+int wifi_manager_ap_password_pending(void)
+{
+    openm1_config_t saved;
+    config_store_get(&saved);
+    return strcmp(saved.recovery_ap_password,boot_ap_password)!=0;
+}
 static uint32_t desired_revision;
 static int disconnect_requested,scan_requested;
 #define WIFI_SCAN_TIMEOUT_MS 15000u
@@ -230,6 +242,7 @@ static OSStatus recovery_ap_start(void)
     memset(&config,0,sizeof(config));
     config.wifi_mode=Soft_AP;
     snprintf(config.wifi_ssid,sizeof(config.wifi_ssid),"%s",recovery_ssid());
+    memcpy(config.wifi_key,boot_ap_password,sizeof(boot_ap_password));
     memcpy(config.local_ip_addr,RECOVERY_IP,sizeof(RECOVERY_IP));
     memcpy(config.net_mask,"255.255.255.0",sizeof("255.255.255.0"));
     memcpy(config.gateway_ip_addr,RECOVERY_IP,sizeof(RECOVERY_IP));

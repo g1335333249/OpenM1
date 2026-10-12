@@ -32,14 +32,5 @@ assert.deepEqual(fetches,[],'diagnostics must not automatically probe or fetch h
   assert(fallback,'HTTP fallback must use execCommand');
   await $('wifi-history-export').handlers.click();
   assert.equal(downloaded,'OpenM1-wifi-history.json');
-  await $('ipv6-probe').handlers.click();
-  assert(fetches.includes('/api/ipv6/probe'));
-  assert.match($('ipv6-message').textContent,/检测结束：unsupported/);
-  await $('ipv6-tcp-probe').handlers.click();
-  assert(fetches.includes('/api/ipv6/probe/tcp'));
-  assert.equal(JSON.parse(tcpOptions.body).confirm_ipv6_tcp,true);
-  context.navigator.clipboard={writeText:async value=>{copied=value}};
-  await $('ipv6-copy').handlers.click();
-  assert.match(copied,/"verdict": "unsupported"/);
-  console.log('V014_DIAGNOSTICS_WEB_PASS: manual history, copy fallback, export, IPv6 probe');
+  console.log('V014_DIAGNOSTICS_WEB_PASS: manual history, copy fallback, export, SOCKS5 page');
 })().catch(error=>{console.error(error);process.exitCode=1});

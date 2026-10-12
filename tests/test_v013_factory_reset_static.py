@@ -34,5 +34,5 @@ assert 'button_manager_status_json(json,sizeof(json))' in http
 assert 'POST /api/button' not in http
 assert '/api/button/status' in page and '实体按钮诊断' in page
 assert 'button_manager_tick' in budget and 'config_store_factory_reset' in budget
-assert 'OPENM1_CONFIG_VERSION 3u' in Path('openm1/config_store.h').read_text()
+assert 'OPENM1_CONFIG_VERSION 4u' in Path('openm1/config_store.h').read_text()
 print('V013_FACTORY_RESET_STATIC_PASS: dry-run, UART validation, OTA gate, safe context, read-only API')
