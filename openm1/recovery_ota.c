@@ -2,6 +2,7 @@
 #include "system_stats.h"
 #include "openm1_log.h"
 #include "ota_transfer_logic.h"
+#include "mico_security.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,8 @@ typedef struct {
     uint32_t length;
     uint16_t initial_len;
     uint8_t initial[2048];
+    int background;
+    char expected_sha256[65];
 } ota_job_t;
 
 static ota_job_t job;
@@ -313,6 +316,29 @@ int recovery_ota_verify_flash(uint32_t total, uint16_t *boot_crc)
     openm1_log_info("OTA","MD5 OK; OTA CRC16=%04x",boot_result);
     return 1;
 }
+/* HA's expected digest is checked over a complete Flash readback, including
+ * the OTA's embedded MD5. Never trust the received network buffer. */
+static int verify_expected_sha256(uint32_t total,const char *expected)
+{
+    SHA256Context sha;
+    uint8_t digest[SHA256HashSize];
+    char actual[65];
+    uint32_t at=0,left=total,count;
+    unsigned i;
+    if (SHA256Reset(&sha)) {fail("SHA256 initialization failed");return 0;}
+    while (left) {
+        count=left>sizeof(io_buffer)?sizeof(io_buffer):left;
+        if (!flash_read(at,io_buffer,count) || SHA256Input(&sha,io_buffer,count)) {
+            fail("SHA256 Flash read failed");return 0;
+        }
+        at+=count;left-=count;
+    }
+    if (SHA256Result(&sha,digest)) {fail("SHA256 calculation failed");return 0;}
+    for (i=0;i<SHA256HashSize;i++) snprintf(actual+i*2,3,"%02x",digest[i]);
+    if (strcasecmp(actual,expected)) {fail("OTA SHA256 mismatch");return 0;}
+    openm1_log_info("OTA","Flash SHA256 OK");
+    return 1;
+}
 static int parse_url(const char *url, char *host, size_t host_size, uint16_t *port, const char **path)
 {
     const char *authority,*slash,*colon; size_t len;
@@ -397,6 +423,7 @@ static void recovery_ota_upload_handler(mico_thread_arg_t arg)
         ok=ota_receive(job.fd,total,job.initial,job.initial_len,"uploading");
     }
     if (ok) ok=recovery_ota_verify_flash(total,&boot_crc);
+    if (ok && job.background) ok=verify_expected_sha256(total,job.expected_sha256);
     if (ok) {
         OSStatus result;
         set_status("ready","OTA verified",total,total);
@@ -410,17 +437,19 @@ static void recovery_ota_upload_handler(mico_thread_arg_t arg)
         else {
             openm1_log_info("OTA","boot table updated");
             set_status("rebooting","Upgrade verified; rebooting",total,total);
-            recovery_send_json(job.fd,200,"{\"ok\":true,\"message\":\"OTA verified. Device will reboot.\"}");
-            close(job.fd);
-            job.fd=-1;
+            if (!job.background) {
+                recovery_send_json(job.fd,200,"{\"ok\":true,\"message\":\"OTA verified. Device will reboot.\"}");
+                close(job.fd);
+                job.fd=-1;
+            }
             mico_thread_msleep(2000);
             openm1_log_info("OTA","reboot requested");
             MicoSystemReboot();
         }
     }
-    if (job.fd>=0 && (!ok || !strcmp(status.state,"failed")))
+    if (!job.background && job.fd>=0 && (!ok || !strcmp(status.state,"failed")))
         recovery_send_json(job.fd,400,"{\"ok\":false,\"message\":\"OTA failed. See /api/ota/status for details.\"}");
-    if (job.fd>=0) close(job.fd);
+    if (!job.background && job.fd>=0) close(job.fd);
     lock_status(); status.active=0; unlock_status();
     mico_rtos_delete_thread(NULL);
 }
@@ -446,12 +475,43 @@ int recovery_ota_begin(int fd, int is_url, uint32_t length, const uint8_t *initi
     status.message[0]=0;
     strcpy(detected_kernel,"unknown");
     unlock_status();
-    job.fd=fd; job.is_url=is_url; job.length=length;
+    job.fd=fd; job.is_url=is_url; job.length=length;job.background=0;job.expected_sha256[0]=0;
     job.initial_len=(uint16_t)initial_len;
     if (initial_len) memcpy(job.initial,initial,initial_len);
     result=mico_rtos_create_thread(&ota_thread,MICO_APPLICATION_PRIORITY,"openm1_ota",
             is_url?recovery_ota_url_handler:recovery_ota_upload_handler,RECOVERY_OTA_STACK,0);
     system_stats_end_thread_creation();
     if (result!=kNoErr) { fail("OTA worker start failed"); lock_status(); status.active=0; unlock_status(); return 0; }
+    return 1;
+}
+int recovery_ota_begin_background_url(const char *url,const char *sha256_hex)
+{
+    size_t length,i;
+    OSStatus result;
+    if (!url || !sha256_hex) return 0;
+    length=strlen(url);
+    if (length<8 || length>URL_LIMIT || strncmp(url,"http://",7) ||
+        strlen(sha256_hex)!=64) return 0;
+    for (i=0;i<64;i++) if (!((sha256_hex[i]>='0'&&sha256_hex[i]<='9') ||
+        (sha256_hex[i]>='a'&&sha256_hex[i]<='f') ||
+        (sha256_hex[i]>='A'&&sha256_hex[i]<='F'))) return 0;
+    (void)recovery_ota_busy();
+    if (!system_stats_begin_ota_thread(RECOVERY_OTA_STACK)) return -2;
+    lock_status();
+    if (status.active) {unlock_status();system_stats_end_thread_creation();return 0;}
+    status.active=1;status.prepared=0;status.state="downloading";
+    status.received=0;status.total=0;status.message[0]=0;
+    status.recv_timeout_count=0;status.recv_retry_count=0;status.last_recv_error=0;
+    status.last_progress_ms=0;status.flash_write_fail_count=0;status.peer_closed=0;
+    strcpy(detected_kernel,"unknown");
+    unlock_status();
+    job.fd=-1;job.is_url=1;job.background=1;job.length=0;
+    job.initial_len=(uint16_t)length;
+    memcpy(job.initial,url,length);
+    memcpy(job.expected_sha256,sha256_hex,65);
+    result=mico_rtos_create_thread(&ota_thread,MICO_APPLICATION_PRIORITY,"openm1_ota",
+            recovery_ota_url_handler,RECOVERY_OTA_STACK,0);
+    system_stats_end_thread_creation();
+    if (result!=kNoErr) {fail("OTA worker start failed");lock_status();status.active=0;unlock_status();return 0;}
     return 1;
 }

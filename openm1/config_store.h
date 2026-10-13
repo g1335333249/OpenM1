@@ -3,7 +3,9 @@
 #include <stdint.h>
 
 #define OPENM1_CONFIG_MAGIC 0x314d504fu
-#define OPENM1_CONFIG_VERSION 4u
+#define OPENM1_CONFIG_VERSION 5u
+#define OPENM1_CONFIG_V4_SIZE 936u
+#define OPENM1_NTP_DEFAULT_SERVER "ntp.aliyun.com"
 typedef struct {
     uint32_t magic;
     uint16_t version;
@@ -36,11 +38,20 @@ typedef struct {
     char proxy_password[64];
     /* Layout compatibility only. Former v0.6.19 AP credential is never used. */
     uint8_t legacy_unused[64];
+    uint8_t v4_trailing_padding[2];
+    uint8_t ntp_enabled;
+    uint8_t ha_ota_enabled;
+    uint16_t ntp_interval_minutes;
+    char ntp_server[65];
+    char ha_ota_url[129];
+    char ha_ota_version[32];
+    char ha_ota_sha256[65];
 } openm1_config_t;
 
 void config_store_defaults(openm1_config_t *config);
 OSStatus config_store_init(void);
 void config_store_get(openm1_config_t *out);
+void config_store_get_time_settings(char server[65],uint16_t *minutes,uint8_t *enabled);
 OSStatus config_store_save(const openm1_config_t *config);
 OSStatus config_store_save_brightness(uint8_t brightness, uint8_t last_nonzero);
 OSStatus config_store_factory_reset(void);

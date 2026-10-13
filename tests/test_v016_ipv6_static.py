@@ -15,5 +15,5 @@ assert 'if (recovery_ota_busy()) return -2;' in ipv6
 assert 'IPV6_DIAGNOSTIC_WORKER_STACK+9216u+8192u' in ipv6
 assert 'gethostbyname' in mqtt and 'AF_INET' in mqtt and 'AF_INET6' not in mqtt
 assert 'WIFI_AP_AUTO_CLOSE_SUPPORTED 0' in Path('openm1/wifi_station_logic.h').read_text()
-assert 'OPENM1_CONFIG_VERSION 4' in Path('openm1/config_store.h').read_text()
+assert 'OPENM1_CONFIG_VERSION 5' in Path('openm1/config_store.h').read_text()
 print('V016_IPV6_STATIC_PASS: manual TCP, IPv4 MQTT and AP policy preserved')

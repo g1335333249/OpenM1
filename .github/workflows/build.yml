@@ -1,8 +1,8 @@
-name: Build OpenM1 v0.6.21 display power test
+name: Build OpenM1 v0.6.22 HA OTA NTP test
 on:
   workflow_dispatch:
   push:
-    branches: [main, release/v0.6.20-stable, feature/recovery-ap-default-password, feature/v0.6.21-display-power]
+    branches: [main, release/v0.6.20-stable, feature/recovery-ap-default-password, feature/v0.6.21-display-power, feature/v0.6.22-ha-ota-ntp]
 permissions:
   contents: read
 jobs:
@@ -28,6 +28,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OpenM1-v0.6.21-display-power-test
+          name: OpenM1-v0.6.22
           path: dist/
           if-no-files-found: error

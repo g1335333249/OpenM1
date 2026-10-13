@@ -1105,6 +1105,15 @@ int wifi_manager_station_ready(void)
     unlock_status();
     return ready;
 }
+uint32_t wifi_manager_station_ready_uptime_ms(void)
+{
+    uint32_t since=0;
+    lock_status();
+    if (status.link_cached && status.ip_valid_cached && !strcmp(status.state,"connected"))
+        since=status.link_up_since_ms;
+    unlock_status();
+    return since?(uint32_t)(mico_rtos_get_time()-since):0u;
+}
 int wifi_manager_control_running(void)
 {
     int running;

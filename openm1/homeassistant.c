@@ -1,6 +1,7 @@
 #include "homeassistant.h"
 #include "wifi_manager.h"
 #include "recovery.h"
+#include "ha_ota.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -51,7 +52,7 @@ int homeassistant_publish(Client *client,const openm1_config_t *config,int remov
                 "\"state_class\":\"measurement\",%s"
                 "\"availability_topic\":\"%s\",\"payload_available\":\"online\",\"payload_not_available\":\"offline\","
                 "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\",\"manufacturer\":\"Phicomm / OpenM1\","
-                "\"model\":\"M1\",\"sw_version\":\"OpenM1 v0.6.21\",\"configuration_url\":\"%s\"}}",
+                "\"model\":\"M1\",\"sw_version\":\"OpenM1 v0.6.22\",\"configuration_url\":\"%s\"}}",
                 entity->name,id,entity->object,state,entity->json_key,entity->unit,
                 class_field,
                 availability,id,recovery_ssid(),url);
@@ -77,12 +78,36 @@ int homeassistant_publish(Client *client,const openm1_config_t *config,int remov
             "\"payload_not_available\":\"offline\","
             "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\","
             "\"manufacturer\":\"Phicomm / OpenM1\",\"model\":\"M1\","
-            "\"sw_version\":\"OpenM1 v0.6.21\",\"configuration_url\":\"%s\"}}",
+            "\"sw_version\":\"OpenM1 v0.6.22\",\"configuration_url\":\"%s\"}}",
             id,command,state,availability,id,recovery_ssid(),url);
         if (n<0 || (size_t)n>=sizeof(payload)) return -1;
     }
     message.payload=payload;
     message.payloadlen=strlen(payload);
+    if (MQTTPublish(client,topic,&message)!=MQTT_SUCCESS) return -1;
+    n=snprintf(topic,sizeof(topic),"%s/update/%s/firmware/config",config->discovery_prefix,id);
+    if (n<0 || (size_t)n>=sizeof(topic)) return -1;
+    if (remove || !config->ha_ota_enabled ||
+        !ha_ota_config_complete(config->ha_ota_url,config->ha_ota_version,config->ha_ota_sha256)) payload[0]=0;
+    else {
+        char command[160],firmware_state[160];
+        n=snprintf(command,sizeof(command),"%s/firmware/install",config->base_topic);
+        if (n<0 || (size_t)n>=sizeof(command)) return -1;
+        n=snprintf(firmware_state,sizeof(firmware_state),"%s/firmware/status",config->base_topic);
+        if (n<0 || (size_t)n>=sizeof(firmware_state)) return -1;
+        n=snprintf(payload,sizeof(payload),
+            "{\"name\":\"OpenM1 固件更新\",\"unique_id\":\"%s_firmware\","
+            "\"device_class\":\"firmware\",\"command_topic\":\"%s\","
+            "\"payload_install\":\"INSTALL\",\"state_topic\":\"%s\","
+            "\"availability_topic\":\"%s\",\"payload_available\":\"online\","
+            "\"payload_not_available\":\"offline\","
+            "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\","
+            "\"manufacturer\":\"Phicomm / OpenM1\",\"model\":\"M1\","
+            "\"sw_version\":\"OpenM1 v0.6.22\",\"configuration_url\":\"%s\"}}",
+            id,command,firmware_state,availability,id,recovery_ssid(),url);
+        if (n<0 || (size_t)n>=sizeof(payload)) return -1;
+    }
+    message.payload=payload;message.payloadlen=strlen(payload);
     if (MQTTPublish(client,topic,&message)!=MQTT_SUCCESS) return -1;
     return 0;
 }

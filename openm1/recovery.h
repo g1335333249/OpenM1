@@ -23,6 +23,7 @@ int recovery_http_ready(void);
 void recovery_ota_partition_log(void);
 void recovery_ota_status_json(char *out, size_t size);
 int recovery_ota_begin(int fd, int is_url, uint32_t length, const uint8_t *initial, size_t initial_len);
+int recovery_ota_begin_background_url(const char *url,const char *sha256_hex);
 int recovery_ota_prepare(void);
 int recovery_ota_busy(void);
 void recovery_send_json(int fd, int code, const char *json);

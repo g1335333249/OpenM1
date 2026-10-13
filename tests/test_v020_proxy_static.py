@@ -9,7 +9,7 @@ page = source("openm1/recovery_page.html")
 wifi = source("openm1/wifi_manager.c")
 main = source("openm1/main.c")
 
-assert "#define OPENM1_CONFIG_VERSION 4u" in config
+assert "#define OPENM1_CONFIG_VERSION 5u" in config
 assert "proxy_enabled" in config and "proxy_password[64]" in config
 assert "recovery_ap_password" not in config
 assert "proxy_port=1080" in source("openm1/config_store.c")
@@ -27,5 +27,5 @@ assert "#if WIFI_AP_AUTO_CLOSE_SUPPORTED" in wifi
 assert "WIFI_AP_AUTO_CLOSE_SUPPORTED 0" in source("openm1/wifi_station_logic.h")
 assert "ap_security" not in main and "ap_security" not in wifi
 assert "OPENM1_FACTORY_RESET_DRY_RUN 1" in source("openm1/button_manager.h")
-assert "0.6.21" in main and "0.6.21" in source("tools/generate_manifest.py")
+assert "0.6.22" in main and "0.6.22" in source("tools/generate_manifest.py")
 print("V020_PROXY_STABILITY_STATIC_PASS")

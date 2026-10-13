@@ -1,6 +1,12 @@
-# OpenM1 v0.6.21
+# OpenM1 v0.6.22
 
-> **显示指示灯实机测试分支。** 已实机验证的固定 Recovery AP 密码版位于 main，热点为 `OpenM1-XXXXXX`，密码为 `QQ123456qq`。本分支的 Artifact 标为 `OpenM1-v0.6.21-display-power-test`；显示改动须经真实 M1 验证后才考虑合入 main。
+> **v0.6.22 功能测试分支。** v0.6.21 已由用户实机验证并合入 main。本分支新增 HA 固件升级请求与 NTP 校时，须经真实 M1 验证后才考虑合入 main。Recovery 热点为 `OpenM1-XXXXXX`，固定密码为 `QQ123456qq`。
+
+## v0.6.22 Home Assistant OTA 与 NTP
+
+HA MQTT Discovery 在原有五个实体之外，可为已保存完整升级任务的设备发布固件 Update 实体。后台默认禁用；用户须在「固件升级」页保存可信局域网 IPv4 HTTP 下载地址、目标版本和 64 位 SHA256，并明确开启。安装命令仅接受非 retained 的 `INSTALL`，不从 MQTT payload 读取 URL。MQTT 回调只标记待处理请求；OTA worker 复用现有 URL 下载、OTA_TEMP 写入和 Flash 回读校验。HA 启动模式不持有 HTTP 客户端 fd；升级前从 Flash 再次计算整个 OTA 文件 SHA256，且只有原有 APP CRC、OTA MD5、Boot CRC 与预期 SHA256 全部通过才可激活。升级期间 MQTT 释放连接，网页 `/api/ota/status` 继续显示真实状态。当前 URL OTA 只支持 HTTP；管理界面没有登录认证，应只使用可信 LAN 固件服务器，不能将管理界面暴露到公网。
+
+NTP 默认启用 `ntp.aliyun.com`，每六小时同步；可选择阿里云或腾讯云预设，或输入自定义 IPv4/域名，间隔限制 15–1440 分钟。首次 Station 获取 IP 后等待约 20 秒，由按需创建的短期 worker 执行单次 IPv4 UDP 123 请求；失败退避，OTA、断网和低内存时暂停。回包校验后以 UTC Unix 时间调用固定 MX1290 MOC 的 `MicoRtcSetTime()`，网页按中国标准时间显示；不会猜测 ATSAMD20 的屏幕校时 UART 协议。状态查询只读 RAM，不触发网络请求。旧 v4 参数在 RAM 中迁移到 v5，开机不为迁移写 Flash；只有明确保存设置才持久化。固定 Kernel 的域名解析可能缺乏可取消的超时，故 DNS 仅在短期 NTP worker 中调用，实机仍须观察是否长期阻塞。
 
 ## v0.6.21 屏幕熄灭时关闭网络指示灯
 
@@ -179,9 +185,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.6.21-display-power-test@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.6.22@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.6.21-display-power-test.bin
+  --app dist/OpenM1-v0.6.22.bin
 ```
 
-本分支可通过 `workflow_dispatch` 手动构建，也由功能分支 push 自动触发。Artifact 为 `OpenM1-v0.6.21-display-power-test`；main 和稳定分支仍使用各自原有提交和构建定义。测试 Artifact 包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号和校验报告。熄屏指示灯行为须在真实 M1 上验证后再考虑合入 main。
+本分支可通过 `workflow_dispatch` 手动构建，也由功能分支 push 自动触发。Artifact 为 `OpenM1-v0.6.22`；main 保持已验证的 v0.6.21。测试 Artifact 包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号和校验报告。HA OTA、NTP 与 v4→v5 配置迁移须在真实 M1 上验证后再考虑合入 main。

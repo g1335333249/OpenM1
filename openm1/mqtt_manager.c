@@ -15,6 +15,7 @@
 #include "mqtt_diagnostics.h"
 #include "mqtt_proxy.h"
 #include "socks5_protocol.h"
+#include "ha_ota.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,13 +53,28 @@ static const char *proxy_state_name(const mqtt_status_t *snapshot)
 static mqtt_status_t status={{0}};
 static mico_mutex_t status_mutex;
 /* Configuration endpoints run on the single Recovery HTTP thread. */
-static json_min_field_t mqtt_config_fields[12];
+static json_min_field_t mqtt_config_fields[9];
 static mico_thread_t worker_thread;
 static int manager_ready;
 static int worker_created,worker_creation_pending;
 /* MQTT callbacks run synchronously inside MQTTYield on the one MQTT worker. */
 static volatile ha_brightness_pending_t brightness_command;
 static const char *active_brightness_topic;
+static char firmware_install_topic[160];
+static char firmware_status_topic[160];
+static volatile int firmware_install_pending;
+static void firmware_install_callback(MessageData *data)
+{
+    size_t length;
+    if (!data || !data->message || !data->topicName || !data->message->payload ||
+        data->message->retained) return;
+    length=strlen(firmware_install_topic);
+    if (!length || data->topicName->lenstring.len!=(int)length ||
+        memcmp(data->topicName->lenstring.data,firmware_install_topic,length) ||
+        !ha_ota_install_payload_valid(data->message->payload,
+            data->message->payloadlen,data->message->retained)) return;
+    firmware_install_pending=1; /* No DNS, Flash, logging, or MQTT re-entry here. */
+}
 static void brightness_message_callback(MessageData *data)
 {
     size_t topic_length;
@@ -242,7 +258,7 @@ int mqtt_manager_configure(const char *body,size_t length)
     int count,i,clear_password=0;
     unsigned number;
     if (!manager_ready || !body || length>1024) return -1;
-    count=json_min_parse(body,length,fields,12);
+    count=json_min_parse(body,length,fields,9);
     if (count<0) return -1;
     config_store_get(&next);
     for (i=0;i<count;i++) {
@@ -378,6 +394,18 @@ static int publish(Client *client,const char *topic,const char *payload,int reta
     message.payload=(void *)payload;message.payloadlen=strlen(payload);
     return MQTTPublish(client,topic,&message);
 }
+static int publish_firmware_status(Client *client,const openm1_config_t *config,int installing)
+{
+    char payload[160];
+    int n;
+    if (!config->ha_ota_enabled ||
+        !ha_ota_config_complete(config->ha_ota_url,config->ha_ota_version,config->ha_ota_sha256)) return 0;
+    n=snprintf(payload,sizeof(payload),
+        "{\"installed_version\":\"0.6.22\",\"latest_version\":\"%s\",\"in_progress\":%s}",
+        config->ha_ota_version,installing?"true":"false");
+    if (n<0 || (size_t)n>=sizeof(payload)) return -1;
+    return publish(client,firmware_status_topic,payload,1);
+}
 static int publish_state(Client *client,const openm1_config_t *config)
 {
     m1_sensor_snapshot_t sensor;
@@ -480,6 +508,21 @@ static void mqtt_worker(mico_thread_arg_t arg)
         status.brightness_control_subscribed=1;
         status.last_subscribe_result=MQTT_SUCCESS;
         mico_rtos_unlock_mutex(&status_mutex);
+        rc=snprintf(firmware_install_topic,sizeof(firmware_install_topic),"%s/firmware/install",config.base_topic);
+        if (rc<0 || (size_t)rc>=sizeof(firmware_install_topic)) {
+            record_failure(MQTT_STAGE_SUBSCRIBE,-1);goto close_network;
+        }
+        rc=snprintf(firmware_status_topic,sizeof(firmware_status_topic),"%s/firmware/status",config.base_topic);
+        if (rc<0 || (size_t)rc>=sizeof(firmware_status_topic)) {
+            record_failure(MQTT_STAGE_SUBSCRIBE,-1);goto close_network;
+        }
+        firmware_install_pending=0;
+        rc=MQTTSubscribe(&client,firmware_install_topic,QOS0,firmware_install_callback);
+        if (rc!=MQTT_SUCCESS) {
+            record_failure(MQTT_STAGE_SUBSCRIBE,rc);
+            openm1_log_error("MQTT","firmware install subscribe failed rc=%d",rc);
+            goto close_network;
+        }
         connected=1;backoff=5;
         record_connected();
         set_state("connected","");
@@ -488,6 +531,9 @@ static void mqtt_worker(mico_thread_arg_t arg)
             record_failure(MQTT_STAGE_AVAILABILITY_PUBLISH,rc);
             openm1_log_error("MQTT","availability publish failed rc=%d",rc);
             goto close_network;
+        }
+        if (publish_firmware_status(&client,&config,0)!=MQTT_SUCCESS) {
+            record_failure(MQTT_STAGE_STATE_PUBLISH,-1);goto close_network;
         }
         last_publish=0;
         for (;;) {
@@ -510,6 +556,21 @@ static void mqtt_worker(mico_thread_arg_t arg)
                 status.ha_active=current.ha_enabled;
                 status.last_discovery_ms=mico_rtos_get_time();
                 mico_rtos_unlock_mutex(&status_mutex);
+            }
+            if (current.ha_ota_enabled!=config.ha_ota_enabled ||
+                strcmp(current.ha_ota_url,config.ha_ota_url) ||
+                strcmp(current.ha_ota_version,config.ha_ota_version) ||
+                strcmp(current.ha_ota_sha256,config.ha_ota_sha256)) {
+                if (current.ha_enabled && homeassistant_publish(&client,&current,0)) {
+                    record_failure(MQTT_STAGE_HA_DISCOVERY,-1);break;
+                }
+                if (publish_firmware_status(&client,&current,0)!=MQTT_SUCCESS) {
+                    record_failure(MQTT_STAGE_STATE_PUBLISH,-1);break;
+                }
+                config.ha_ota_enabled=current.ha_ota_enabled;
+                memcpy(config.ha_ota_url,current.ha_ota_url,sizeof(config.ha_ota_url));
+                memcpy(config.ha_ota_version,current.ha_ota_version,sizeof(config.ha_ota_version));
+                memcpy(config.ha_ota_sha256,current.ha_ota_sha256,sizeof(config.ha_ota_sha256));
             }
             if (!last_publish || mico_rtos_get_time()-last_publish>=current.publish_interval*1000u) {
                 rc=publish_state(&client,&current);
@@ -534,6 +595,25 @@ static void mqtt_worker(mico_thread_arg_t arg)
                 record_failure(stage,rc);
                 openm1_log_error("MQTT","MQTTYield failed rc=%d stage=%s",rc,mqtt_failure_stage_name(stage));
                 break;
+            }
+            if (firmware_install_pending) {
+                int started;
+                firmware_install_pending=0;
+                config_store_get(&current);
+                if (current.ha_ota_enabled && current.ha_enabled &&
+                    ha_ota_config_complete(current.ha_ota_url,current.ha_ota_version,current.ha_ota_sha256) &&
+                    wifi_manager_station_ready_uptime_ms()>=30000u && !recovery_ota_busy()) {
+                    if (publish_firmware_status(&client,&current,1)!=MQTT_SUCCESS) {
+                        record_failure(MQTT_STAGE_STATE_PUBLISH,-1);break;
+                    }
+                    started=recovery_ota_begin_background_url(current.ha_ota_url,current.ha_ota_sha256);
+                    if (started==1) {
+                        openm1_log_info("OTA","HA install request accepted");
+                        break; /* Existing OTA isolation closes MQTT socket. */
+                    }
+                    openm1_log_warn("OTA","HA install request deferred code=%d",started);
+                    publish_firmware_status(&client,&current,0);
+                } else openm1_log_warn("OTA","HA install ignored: configuration, network, or OTA busy");
             }
             if (ha_brightness_take_invalid(&brightness_command)) {
                 mico_rtos_lock_mutex(&status_mutex);
@@ -566,6 +646,7 @@ static void mqtt_worker(mico_thread_arg_t arg)
         }
 close_network:
         active_brightness_topic=NULL;
+        firmware_install_pending=0;
         brightness_command.pending=0;brightness_command.invalid=0;
         mico_rtos_lock_mutex(&status_mutex);
         status.brightness_control_subscribed=0;
@@ -838,8 +919,10 @@ void homeassistant_status_json(char *out,size_t capacity)
     config_store_get(&config);
     memset(&snapshot,0,sizeof(snapshot));
     if (manager_ready) {mico_rtos_lock_mutex(&status_mutex);snapshot=status;mico_rtos_unlock_mutex(&status_mutex);}
-    snprintf(out,capacity,"{\"enabled\":%s,\"active\":%s,\"entity_count\":5,\"discovery_prefix\":\"%s\",\"mqtt_ready\":%s,\"last_publish_ms\":%lu}",
-        config.ha_enabled?"true":"false",snapshot.ha_active?"true":"false",config.discovery_prefix,
+    snprintf(out,capacity,"{\"enabled\":%s,\"active\":%s,\"entity_count\":%u,\"discovery_prefix\":\"%s\",\"mqtt_ready\":%s,\"last_publish_ms\":%lu}",
+        config.ha_enabled?"true":"false",snapshot.ha_active?"true":"false",
+        ha_ota_config_complete(config.ha_ota_url,config.ha_ota_version,config.ha_ota_sha256)&&config.ha_ota_enabled?6u:5u,
+        config.discovery_prefix,
         ha_policy_can_enable(config.host[0]!=0,config.mqtt_enabled,snapshot.connected)?"true":"false",
         (unsigned long)snapshot.last_discovery_ms);
 }

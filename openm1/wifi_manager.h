@@ -40,6 +40,7 @@ void wifi_manager_history_note(wifi_history_reason_t reason);
 void wifi_manager_history_snapshot(uint32_t *oldest,uint32_t *newest,unsigned *count);
 int wifi_manager_history_record_json(uint32_t sequence,char *out,size_t capacity);
 int wifi_manager_station_ready(void);
+uint32_t wifi_manager_station_ready_uptime_ms(void);
 int wifi_manager_station_link(void);
 int wifi_manager_station_rssi(void);
 void wifi_manager_station_ip(char out[16]);

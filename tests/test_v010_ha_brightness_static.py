@@ -11,10 +11,10 @@ for sensor in ('temperature','humidity','pm25','formaldehyde'):
 assert '/number/%s/brightness/config' in ha
 for field in ('屏幕亮度','%s_brightness','%s/brightness/set','value_json.brightness',
               '\\"min\\":0','\\"max\\":4','\\"step\\":1','\\"mode\\":\\"slider',
-              'availability_topic','payload_available','payload_not_available','OpenM1 v0.6.21'):
+              'availability_topic','payload_available','payload_not_available','OpenM1 v0.6.22'):
     assert field in ha, field
 assert 'if (remove) payload[0]=0' in ha
-assert ha.count('MQTTPublish(client,topic,&message)')==2
+assert ha.count('MQTTPublish(client,topic,&message)')==3
 assert 'MQTTSubscribe(&client,brightness_topic,QOS0,brightness_message_callback)' in mqtt
 assert mqtt.index('MQTTConnect(&client,&options)')<mqtt.index('MQTTSubscribe(&client,brightness_topic')<mqtt.index('publish(&client,availability,"online",1)')
 callback=mqtt.split('static void brightness_message_callback')[1].split('static openm1_mqtt_read_state_t')[0]
@@ -30,10 +30,10 @@ assert 'ha_brightness_format_state(payload,sizeof(payload)' in mqtt
 assert '\\"brightness\\":%u' in parser
 assert 'brightness_control_subscribed' in mqtt and 'subscribe_fail_count' in mqtt
 assert 'MQTT_STAGE_SUBSCRIBE' in mqtt
-assert '"entity_count\\":5' in mqtt or '\\"entity_count\\":5' in mqtt
+assert 'entity_count\\":%u' in mqtt and 'ha_ota_config_complete(' in mqtt
 assert 'h.entity_count||5' in page
 assert 'recovery_ota_busy()' in display
-assert '#define OPENM1_CONFIG_VERSION 4u' in Path('openm1/config_store.h').read_text()
+assert '#define OPENM1_CONFIG_VERSION 5u' in Path('openm1/config_store.h').read_text()
 assert 'WIFI_BOOT_AUTO_CONNECT_GRACE_MS 60000u' in Path('openm1/wifi_station_logic.h').read_text()
-assert '0.6.21' in Path('openm1/main.c').read_text()
+assert '0.6.22' in Path('openm1/main.c').read_text()
 print('V010_HA_BRIGHTNESS_STATIC_PASS')

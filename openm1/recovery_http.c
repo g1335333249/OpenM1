@@ -11,6 +11,8 @@
 #include "http_activity.h"
 #include "button_manager.h"
 #include "ipv6_diagnostic.h"
+#include "time_sync.h"
+#include "ha_ota.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -169,7 +171,7 @@ static int read_small_body(int fd,const char *request,int start,size_t initial,
 static void send_log_download(int fd)
 {
     static const char header[]="HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
-        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.21-log.txt\"\r\n"
+        "Content-Disposition: attachment; filename=\"OpenM1-v0.6.22-log.txt\"\r\n"
         "Connection: close\r\nCache-Control: no-store\r\n\r\n";
     openm1_log_status_t status;
     openm1_log_record_t record;
@@ -178,7 +180,7 @@ static void send_log_download(int fd)
     int n;
     openm1_log_status(&status);
     if (recovery_send_all(fd,header,sizeof(header)-1u)) return;
-    n=snprintf(line,sizeof(line),"OpenM1 v0.6.21\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
+    n=snprintf(line,sizeof(line),"OpenM1 v0.6.22\r\nHostname: %s\r\nUptime: %lu ms\r\nMemory-only log\r\n--------------------------------\r\n",
                recovery_hostname(),(unsigned long)mico_rtos_get_time());
     if (n>0 && n<(int)sizeof(line) && recovery_send_all(fd,line,(size_t)n)) return;
     if (!status.available) {
@@ -308,13 +310,17 @@ static void handle_client(int fd)
             mqtt_manager_proxy_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/homeassistant/status")) {
             homeassistant_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/homeassistant/ota/config")) {
+            ha_ota_config_json(json,sizeof(json)); recovery_send_json(fd,200,json);
+        } else if (!strcmp(path,"/api/time/status")) {
+            time_sync_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/display/status")) {
             m1_display_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/network/health")) {
             network_health_status_json(json,sizeof(json)); recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/info")) {
             micoMemInfo_t *memory=MicoGetMemoryInfo();
-            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.21\",\"version\":\"0.6.21\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
+            snprintf(json,sizeof(json),"{\"device\":\"斐讯悟空 M1\",\"firmware\":\"OpenM1 v0.6.22\",\"version\":\"0.6.22\",\"board\":\"MK3080B\",\"kernel\":\"3080B002.023\",\"rf\":\"%s\",\"mode\":\"recovery\",\"mac\":\"%s\",\"ssid\":\"%s\",\"hostname\":\"%s\",\"ip\":\"%s\",\"uptime\":%lu,\"free_heap\":%d}",
                      recovery_rf(),recovery_mac(),recovery_ssid(),recovery_hostname(),RECOVERY_IP,(unsigned long)(mico_rtos_get_time()/1000),memory?memory->free_memory:-1);
             recovery_send_json(fd,200,json);
         } else if (!strcmp(path,"/api/sensors")) {
@@ -329,6 +335,25 @@ static void handle_client(int fd)
         goto done;
     }
     if (strcmp(method,"POST")) { recovery_send_json(fd,405,"{\"message\":\"Method not allowed\"}"); goto done; }
+    if (!strcmp(path,"/api/time/config") || !strcmp(path,"/api/homeassistant/ota/config")) {
+        char *body=mqtt_config_body;
+        int result;
+        if (!seen || !read_small_body(fd,request,body_start,body_len,length,body,601)) {
+            recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"Invalid configuration body\"}");goto done;
+        }
+        result=!strcmp(path,"/api/time/config")?time_sync_configure(body,length):ha_ota_configure(body,length);
+        memset(body,0,601);
+        if (!result) recovery_send_json(fd,200,"{\"ok\":true}");
+        else recovery_send_json(fd,result==-2?503:400,
+            "{\"ok\":false,\"message\":\"Invalid settings, OTA busy, or save failed\"}");
+        goto done;
+    }
+    if (!strcmp(path,"/api/time/sync")) {
+        if ((seen && length) || body_len) recovery_send_json(fd,400,"{\"ok\":false,\"message\":\"Body not allowed\"}");
+        else if (!time_sync_request()) recovery_send_json(fd,202,"{\"ok\":true,\"state\":\"queued\"}");
+        else recovery_send_json(fd,409,"{\"ok\":false,\"message\":\"NTP busy or OTA active\"}");
+        goto done;
+    }
     if (!strcmp(path,"/api/ipv6/probe") || !strcmp(path,"/api/ipv6/probe/tcp") ||
         !strcmp(path,"/api/ipv6/probe/deep")) {
         int probe_result;
@@ -369,13 +394,13 @@ static void handle_client(int fd)
         goto done;
     }
     if (!strcmp(path,"/api/wifi/settings")) {
-        static char body[513];
+        char *body=mqtt_config_body;
         int result;
-        if (!seen || !read_small_body(fd,request,body_start,body_len,length,body,sizeof(body))) {
+        if (!seen || !read_small_body(fd,request,body_start,body_len,length,body,513)) {
             recovery_send_json(fd,400,"{\"error\":\"Wi-Fi 设置请求无效\"}"); goto done;
         }
         result=wifi_manager_save_settings(body,length);
-        memset(body,0,sizeof(body));
+        memset(body,0,513);
         if (result==0) recovery_send_json(fd,200,"{\"ok\":true}");
         else if (result==-5) recovery_send_json(fd,409,"{\"error\":\"当前 Kernel 暂不支持安全地自动关闭 Recovery AP\"}");
         else if (result==-3) recovery_send_json(fd,409,"{\"error\":\"固件升级期间不能保存 Wi-Fi 设置\"}");

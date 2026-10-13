@@ -28,5 +28,5 @@ for name, next_name in (('m1_display_set_brightness', 'm1_display_screen_on'),
 assert '#define M1_WIFI_ICON_PWM MICO_PWM_5' in display
 assert '#define M1_RED_X_PWM MICO_PWM_4' in display
 assert '#define M1_NETWORK_DISPLAY_WORKER_STACK 2048u' in header
-assert 'OpenM1 v0.6.21' in main and "'version':'0.6.21'" in manifest
+assert 'OpenM1 v0.6.22' in main and "'version':'0.6.22'" in manifest
 print('V021_DISPLAY_POWER_STATIC_PASS')

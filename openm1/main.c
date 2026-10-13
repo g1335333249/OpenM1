@@ -13,6 +13,7 @@
 #include "worker_retry_logic.h"
 #include "button_manager.h"
 #include "ipv6_diagnostic.h"
+#include "time_sync.h"
 
 /* Implemented by the pinned SDK's MiCO/net/mocIP/mico/mico_socket.c. */
 extern char *sethostname(char *name);
@@ -102,6 +103,11 @@ static void housekeeping_worker(mico_thread_arg_t arg)
             if (system_stats_stack_fault_cpu_ready() && mqtt_was_ready_for_cpu)
                 system_stats_maybe_start_cpu();
         }
+        /* Let the existing optional workers settle first. A failed MQTT
+         * creation cannot permanently suppress the independent NTP path. */
+        if ((network_health_started || network_health_failed_once) &&
+            (mqtt_manager_ready_for_cpu() || wifi_manager_station_ready_uptime_ms()>=60000u))
+            time_sync_tick();
         if ((uint32_t)(now-last_heartbeat_ms)>=10000u) {
             last_heartbeat_ms=now;
             memory=MicoGetMemoryInfo();
@@ -127,11 +133,11 @@ int main(void)
     result=openm1_log_init();
     if (result!=kNoErr) printf("BOOT: RAM logger unavailable: %d\r\n",result);
     openm1_log_info("BOOT","app_thread stack configured = %lu",(unsigned long)app_stack_size);
-    openm1_log_info("BOOT","OpenM1 v0.6.21");
+    openm1_log_info("BOOT","OpenM1 v0.6.22");
 
     printf("================================\r\n"
            "OpenM1\r\n"
-           "Version: 0.6.21\r\n"
+           "Version: 0.6.22\r\n"
            "Board: MK3080B\r\n"
            "Kernel: 3080B002.023\r\n"
            "================================\r\n");
@@ -273,6 +279,7 @@ int main(void)
     if (!system_stats_low_memory_safe_mode())
         boot_log_init_error("MQTT",mqtt_manager_init());
     boot_heap_log("after MQTT");
+    boot_log_init_error("NTP manager",time_sync_init());
     printf("BOOT: optional managers initialized; workers remain deferred\r\n");
     printf("BOOT: subsystem initialization complete, free heap = %d\r\n",boot_free_heap());
     result=mico_rtos_create_thread(&housekeeping_thread,MICO_APPLICATION_PRIORITY,

@@ -24,7 +24,7 @@ assert page.index("requestPost('/api/ota/prepare')")<page.index("requestPost('/a
 assert 'initial_len>sizeof(job.initial)' in ota
 assert 'static char request[2049]' in http and 'while (used<2048' in http
 assert 'return; /* OTA worker owns fd' in http
-assert 'if (job.fd>=0) close(job.fd)' in ota
+assert 'if (!job.background && job.fd>=0) close(job.fd)' in ota
 assert 'job.fd=-1;' in ota
 assert 'mico_ota_switch_to_new_fw' in ota and 'recovery_ota_verify_flash' in ota
 assert 'if (recovery_ota_busy()) { mico_thread_msleep(WIFI_CONTROL_INTERVAL_MS); continue; }' in wifi
@@ -36,5 +36,5 @@ assert 'network_health_retry_remaining(' in main and 'network_health_failed_at=m
 assert 'NETWORK_HEALTH_RETRY_MS 30000u' in Path('openm1/worker_retry_logic.h').read_text()
 assert 'worker_retry_remaining_ms' in health and 'start_block_reason' in health
 assert 'system_stats_stack_fault_quiet_remaining_ms()' in main
-assert '0.6.21' in main and '0.6.21' in http and '0.6.21' in Path('tools/generate_manifest.py').read_text()
+assert '0.6.22' in main and '0.6.22' in http and '0.6.22' in Path('tools/generate_manifest.py').read_text()
 print('V069_OTA_STATIC_PASS')

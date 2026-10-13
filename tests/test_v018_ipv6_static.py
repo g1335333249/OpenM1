@@ -14,5 +14,5 @@ assert 'confirm_ipv6_deep' in h and '/api/ipv6/deep/status' in h
 assert 'WIFI_AP_AUTO_CLOSE_SUPPORTED 0' in Path('openm1/wifi_station_logic.h').read_text()
 assert 'micoWlanSuspendSoftAP' not in Path('openm1/wifi_manager.c').read_text().replace('micoWlanSuspendSoftAP()', '')
 assert 'IPv4 / IPv6 TCP 对照' in page
-assert '0.6.21' in Path('openm1/main.c').read_text()
+assert '0.6.22' in Path('openm1/main.c').read_text()
 print('V018_IPV6_STATIC_PASS')
