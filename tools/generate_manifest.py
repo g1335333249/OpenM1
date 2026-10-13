@@ -32,8 +32,8 @@ symbols_valid = all(f'PASS {symbol}' in header for symbol in ('user_handler','mo
 sdk_valid = Path('mico-os').is_dir() and __import__('subprocess').check_output(['git','-C','mico-os','rev-parse','HEAD'], text=True).strip() == SDK_COMMIT
 kernel = require_sdk_kernel(a.sdk_kernel)
 valid = all(checks.values()) and header_valid and symbols_valid and sdk_valid and stack_match and '5.4.1' in a.toolchain
-data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.20-ap-password-test',
-        'build_variant':'recovery-ap-fixed-password-hardware-test',
+data = {'name':'OpenM1','firmware':'OpenM1','version':'0.6.21',
+        'build_variant':'display-power-hardware-test',
         'recovery_ap_password_hardware_verified':False,
         'board':'MK3080B','sdk_commit':SDK_COMMIT,
         'kernel':'3080B002.023','kernel_version':'3080B002.023','sdk_kernel_version':'3080B002.023',

@@ -26,12 +26,14 @@ static uint32_t network_test_deadline_ms;
  * and written under the mutex; the potentially blocking HAL call is outside. */
 static int network_pwm_set(mico_pwm_t pwm, bool on, bool force)
 {
-    bool running;
+    bool running,screen_on;
     OSStatus err;
     int channel=pwm==M1_WIFI_ICON_PWM?5:4;
     mico_rtos_lock_mutex(&display_mutex);
     running=pwm==M1_WIFI_ICON_PWM?state.wifi_pwm_running:state.red_x_pwm_running;
+    screen_on=state.screen_on;
     mico_rtos_unlock_mutex(&display_mutex);
+    if (on && !screen_on) return -1; /* A late screen-off wins over a stale worker snapshot. */
     if (!force && running==on) return kNoErr;
     err=on?MicoPwmStart(pwm):MicoPwmStop(pwm);
     mico_rtos_lock_mutex(&display_mutex);
@@ -51,7 +53,7 @@ static int network_pwm_set(mico_pwm_t pwm, bool on, bool force)
 static void network_display_step(void)
 {
     m1_net_display_state_t target,previous;
-    bool ready;
+    bool ready,screen_on;
     uint32_t now=mico_rtos_get_time();
     mico_rtos_lock_mutex(&display_mutex);
     if (state.network_test_active &&
@@ -59,8 +61,21 @@ static void network_display_step(void)
     target=state.network_test_active?network_test_target:state.network_target;
     previous=state.network_applied_target;
     ready=state.network_pwm_ready;
+    screen_on=state.screen_on;
+    if (!screen_on) state.network_test_active=false;
     mico_rtos_unlock_mutex(&display_mutex);
     if (!ready) { mico_thread_msleep(1000); return; }
+    if (!screen_on) {
+        int wifi_result=network_pwm_set(M1_WIFI_ICON_PWM,false,false);
+        int red_x_result=network_pwm_set(M1_RED_X_PWM,false,false);
+        if (wifi_result!=kNoErr || red_x_result!=kNoErr) return;
+        mico_rtos_lock_mutex(&display_mutex);
+        state.blink_phase_on=false;
+        state.network_applied_target=(m1_net_display_state_t)255;
+        mico_rtos_unlock_mutex(&display_mutex);
+        mico_thread_msleep(100);
+        return;
+    }
     if (target!=previous) openm1_log_info("DISPLAY","network -> %s",
                                         target==M1_NET_DISPLAY_DISCONNECTED?"blink":
                                         target==M1_NET_DISPLAY_ONLINE?"online":"no_internet");
@@ -315,7 +330,7 @@ void m1_display_status_json(char *out, size_t capacity)
              (unsigned)s.brightness_level,s.screen_on?"true":"false",
              (unsigned)s.last_nonzero_brightness,
              s.network_target==M1_NET_DISPLAY_ONLINE?"online":s.network_target==M1_NET_DISPLAY_NO_INTERNET?"no_internet":"blink",
-             !s.network_pwm_ready?"off":s.network_applied_target==M1_NET_DISPLAY_DISCONNECTED?"blink":s.wifi_pwm_running?"solid":"off",
+             !s.screen_on || !s.network_pwm_ready?"off":s.network_applied_target==M1_NET_DISPLAY_DISCONNECTED?"blink":s.wifi_pwm_running?"solid":"off",
              s.red_x_pwm_running?"true":"false",s.network_pwm_ready?"true":"false",
              s.wifi_pwm_running?"true":"false",s.red_x_pwm_running?"true":"false",
              s.display_worker_running?"true":"false",s.blink_phase_on?"on":"off",

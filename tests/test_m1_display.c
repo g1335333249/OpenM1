@@ -62,6 +62,7 @@ int main(void)
 {
     uint8_t frame[12],expected[12]={0x23,0x02,0,1,0,0,0,0,0,0,0,0x21};
     m1_display_status_t snapshot;
+    char status_json[640];
     int calls;
     unsigned level;
     assert(m1_display_build_brightness_frame(0,1,frame)!=0);
@@ -101,6 +102,50 @@ int main(void)
     m1_display_get_status(&snapshot);
     assert(snapshot.display_worker_running && !snapshot.network_test_active);
     assert(snapshot.network_target==M1_NET_DISPLAY_NO_INTERNET);
+
+    /* Screen power gates both PWM channels without touching the network state. */
+    calls=pwm_calls;
+    assert(m1_display_set_brightness(0)==0 && pwm_calls==calls);
+    assert(network_pwm_set(M1_WIFI_ICON_PWM,true,false)!=0 && pwm_calls==calls);
+    run_step(); assert(!wifi_pwm_on && !red_x_pwm_on);
+    m1_display_get_status(&snapshot);
+    assert(!snapshot.screen_on && snapshot.network_target==M1_NET_DISPLAY_NO_INTERNET);
+    m1_display_status_json(status_json,sizeof(status_json));
+    assert(strstr(status_json,"\"wifi_icon\":\"off\"") &&
+           strstr(status_json,"\"red_x\":false"));
+    m1_display_set_network_state(M1_NET_DISPLAY_ONLINE);
+    run_step(); assert(!wifi_pwm_on && !red_x_pwm_on);
+    m1_display_set_network_state(M1_NET_DISPLAY_DISCONNECTED);
+    run_step(); assert(!wifi_pwm_on && !red_x_pwm_on);
+    m1_display_set_network_state(M1_NET_DISPLAY_NO_INTERNET);
+    run_step(); assert(!wifi_pwm_on && !red_x_pwm_on);
+    assert(m1_display_set_brightness(4)==0);
+    run_step(); assert(wifi_pwm_on && red_x_pwm_on);
+
+    /* A temporary icon test must not override the real target after wake. */
+    assert(m1_display_network_test("online")==0);
+    assert(m1_display_set_brightness(0)==0);
+    run_step(); assert(!wifi_pwm_on && !red_x_pwm_on);
+    assert(m1_display_set_brightness(4)==0);
+    run_step(); assert(wifi_pwm_on && red_x_pwm_on);
+
+    assert(m1_display_set_brightness(0)==0);
+    run_step();
+    m1_display_set_network_state(M1_NET_DISPLAY_DISCONNECTED);
+    assert(m1_display_set_brightness(4)==0);
+    run_step(); assert(wifi_pwm_on && !red_x_pwm_on);
+    run_step(); assert(!wifi_pwm_on && !red_x_pwm_on);
+    m1_display_set_network_state(M1_NET_DISPLAY_ONLINE);
+    run_step(); assert(wifi_pwm_on && !red_x_pwm_on);
+    m1_display_set_network_state(M1_NET_DISPLAY_NO_INTERNET);
+    run_step(); assert(wifi_pwm_on && red_x_pwm_on);
+
+    /* Physical button reports use the same cached screen_on gate. */
+    m1_display_handle_brightness_event(0);
+    run_step(); assert(!wifi_pwm_on && !red_x_pwm_on);
+    m1_display_handle_brightness_event(1);
+    run_step(); assert(wifi_pwm_on && red_x_pwm_on);
+
     m1_display_set_network_state(M1_NET_DISPLAY_DISCONNECTED);
     run_step(); run_step();
     fail_next_pwm_start=1;
@@ -123,5 +168,19 @@ int main(void)
     assert(sent==1);
     now=2400; m1_display_handle_brightness_event(0);
     assert(sent==2 && last_frame[2]==0x32 && last_frame[3]==0);
+
+    /* A saved zero brightness also keeps the PWM outputs off at cold boot. */
+    memset(&state,0,sizeof(state));
+    state.network_applied_target=(m1_net_display_state_t)255;
+    display_ready=0;
+    saved.brightness_level=0;
+    saved.last_nonzero_brightness=2;
+    assert(m1_display_init()==0);
+    run_worker_start();
+    assert(!wifi_pwm_on && !red_x_pwm_on);
+    m1_display_set_network_state(M1_NET_DISPLAY_ONLINE);
+    run_step(); assert(!wifi_pwm_on && !red_x_pwm_on);
+    assert(m1_display_screen_on()==0);
+    run_step(); assert(wifi_pwm_on && !red_x_pwm_on);
     return 0;
 }

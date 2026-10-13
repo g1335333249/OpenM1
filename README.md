@@ -1,12 +1,16 @@
-# OpenM1 v0.6.20
+# OpenM1 v0.6.21
 
-> **Recovery AP 固定密码实机测试分支。** 此分支的 OTA 和 Artifact 标为 `OpenM1-v0.6.20-ap-password-test`，不属于已验证稳定版 v0.6.20。热点仍为 `OpenM1-XXXXXX`，测试密码固定为 `QQ123456qq`。main 保持开放式 Recovery AP 的原版 v0.6.20；真实 M1 验证热点安全类型、接入、DHCP、网页、冷启动与 AP 自愈之前，不将此分支合入 main。
+> **显示指示灯实机测试分支。** 已实机验证的固定 Recovery AP 密码版位于 main，热点为 `OpenM1-XXXXXX`，密码为 `QQ123456qq`。本分支的 Artifact 标为 `OpenM1-v0.6.21-display-power-test`；显示改动须经真实 M1 验证后才考虑合入 main。
+
+## v0.6.21 屏幕熄灭时关闭网络指示灯
+
+`network_display_worker` 读取互斥锁保护的 `screen_on` 与当前网络目标。屏幕亮度为 0 时，该线程停止 Wi-Fi 图标 PWM5 和红 X PWM4；熄屏期间网络状态变化也不会点亮图标。重新开屏后，该线程重新应用当前网络目标：未连接时闪烁、在线时常亮、无 Internet 时常亮并显示红 X。亮度 UART 帧、实体按钮 `0x0F` 解析、持久化、回显抑制、PWM 频率与通道均不变。实体按钮曾偶发单击无法关屏，断电重启后恢复；原因未确认，本版只记录待观察。
 
 ## v0.6.20 稳定性优先版本
 
-main 上的稳定版以 v0.6.18 提交 `48532850b3cacc9792a60816a302a33175dff29e` 为代码基线，仅移植 MQTT SOCKS5 代理。未合并 v0.6.19 的 AP 密码、IPv6 删除、首页轮询或 Wi-Fi/HTTP/OTA 改动。main 的 Recovery AP 仍开放，SSID 为 `OpenM1-XXXXXX`，地址 `192.168.4.1`；固定 Kernel 的自动关闭 AP 策略继续禁用。已观察到的 Recovery 页面失联和实体图标停止闪烁仍无确定根因，不能以本次变更宣称修复。
+v0.6.20 以 v0.6.18 提交 `48532850b3cacc9792a60816a302a33175dff29e` 为代码基线，仅移植 MQTT SOCKS5 代理。未合并 v0.6.19 的 AP 密码、IPv6 删除、首页轮询或 Wi-Fi/HTTP/OTA 改动。随后固定密码版在独立分支经用户实机验证，以 fast-forward 合入 main。已观察到的 Recovery 页面失联和实体图标停止闪烁仍无确定根因，不能以显示改动宣称修复。
 
-本测试分支只在原有首次 SoftAP 启动和 AP 自愈的 `StartNetwork(SoftAP)` 前设置同一个 `wifi_key`，不读取或保存热点密码到参数 Flash，不改变启动顺序、重试次数、配置版本或家庭 Wi-Fi 凭据。固定 SDK 的 `network_InitTypeDef_st` 提供 `wifi_key[64]`，MX1290 `StartNetwork()` 把该结构直接交给 MOC；SDK 的 SoftAP 示例也通过 `wifi_key` 传密码。MOC Kernel 的实际 WPA2-PSK 广播和认证细节不能从该包装代码证明，必须在真实设备上检查。管理 HTTP 仍无登录认证，热点密码不能代替管理接口认证。
+固定密码版只在原有首次 SoftAP 启动和 AP 自愈的 `StartNetwork(SoftAP)` 前设置同一个 `wifi_key`，不读取或保存热点密码到参数 Flash，不改变启动顺序、重试次数、配置版本或家庭 Wi-Fi 凭据。固定 SDK 的 `network_InitTypeDef_st` 提供 `wifi_key[64]`，MX1290 `StartNetwork()` 把该结构直接交给 MOC；SDK 的 SoftAP 示例也通过 `wifi_key` 传密码。管理 HTTP 仍无登录认证，热点密码不能代替管理接口认证。
 
 代理默认关闭，关闭时 MQTT 沿用 v0.6.18 的 IPv4 直连路径。开启后设备通过 IPv4 Socket 连接 SOCKS5 代理，代理可连接 IPv4、域名或 IPv6 Broker；失败不会自动回退直连。代理配置保存于应用参数，旧 v3 配置启动时在 RAM 中迁移，只有下一次明确保存配置才写 Flash。v0.6.19 的 v4 布局末尾曾存 AP 密码；本版只为读取旧配置保留同尺寸的**无功能兼容尾部**，启动时在 RAM 中清零，Recovery AP 始终开放，不提供密码设置 API 或页面。代理账号、MQTT 账号与管理页面通信均没有端到端加密，不应暴露在不可信公网。手动代理测试只接受代理 IPv4 地址，避免单客户端 HTTP 等待固定 Kernel 的不可取消 DNS。详见 [MQTT 代理说明](docs/mqtt-proxy.md)。
 
@@ -54,7 +58,7 @@ v0.6.17 修复 IPv6 手动诊断可能永久停在 `aaaa_primary` 的问题。�
 
 启动期只创建 Recovery HTTP、显示、UART 与唯一 Wi-Fi control 线程。Network Health 延迟到 Wi-Fi control 正常运行且 Station 就绪后启动；CPU sampler 至少等待 60 秒，MQTT 仅在已配置启用、Station 就绪、OTA 未运行、堆预留足够且最近栈异常已安静 30 秒后创建；手动点击“启动 MQTT”会保存启用状态，未满足条件时由 housekeeping 稍后自动启动。关键服务启动后堆不足 8192 字节，或 Wi-Fi control 不可用时进入 Recovery 安全模式，不启动这些可选 worker，也不自动重启。OTA worker 创建前要求空闲堆大于 5120 字节栈加 4096 字节安全余量；不足时 HTTP 503。`/api/system/stats` 报告启动期/运行期最低空闲堆、阶段、安全模式与栈溢出通知计数。Wi-Fi 故障通知只计数，由唯一控制线程处理 WLAN HAL。GCC `-fstack-usage` 和 ELF 堆区域预算是辅助静态检查，不能替代实机栈/堆观测。
 
-恢复热点名称由设备 Wi-Fi MAC 的最后 3 字节生成，格式为 **`OpenM1-XXXXXX`**，例如 MAC `34:EA:34:12:AB:CD` 对应 `OpenM1-12ABCD`。若 MAC 读取结果无效，则使用 `OpenM1-RECOVERY` 并输出故障日志。main 稳定版热点开放、无密码；**本测试分支请求固定密码 `QQ123456qq`，实际安全类型待实机确认。** 地址固定为 `192.168.4.1/24`，DHCP Server 开启，HTTP 监听 TCP 80。**每次重启先启动恢复热点、HTTP 和 OTA；只有用户保存凭据并启用开机自动连接后，才会尝试连接家庭 Wi-Fi。** Wi-Fi 与 MQTT 密码保存在本机 MiCO 参数 Flash，未加密，不是保险库；GET API 与日志不返回密码。不要在不可信网络暴露此无认证管理界面。
+恢复热点名称由设备 Wi-Fi MAC 的最后 3 字节生成，格式为 **`OpenM1-XXXXXX`**，例如 MAC `34:EA:34:12:AB:CD` 对应 `OpenM1-12ABCD`。若 MAC 读取结果无效，则使用 `OpenM1-RECOVERY` 并输出故障日志。当前 main 和本测试分支使用固定密码 `QQ123456qq`，地址固定为 `192.168.4.1/24`，DHCP Server 开启，HTTP 监听 TCP 80。**每次重启先启动恢复热点、HTTP 和 OTA；只有用户保存凭据并启用开机自动连接后，才会尝试连接家庭 Wi-Fi。** Wi-Fi 与 MQTT 密码保存在本机 MiCO 参数 Flash，未加密，不是保险库；GET API 与日志不会返回密码。不要在不可信网络暴露此无认证管理界面。
 
 ## v0.6.18：手动 IPv6 深度诊断
 
@@ -175,9 +179,9 @@ bash scripts/build_recovery.sh
 手工验证：
 
 ```sh
-python3 tools/verify_ota.py dist/OpenM1-v0.6.20-ap-password-test@MK3080B@moc.ota.bin \
+python3 tools/verify_ota.py dist/OpenM1-v0.6.21-display-power-test@MK3080B@moc.ota.bin \
   --sdk-kernel mico-os/resources/moc_kernel/3080B/kernel.bin \
-  --app dist/OpenM1-v0.6.20-ap-password-test.bin
+  --app dist/OpenM1-v0.6.21-display-power-test.bin
 ```
 
-本分支可通过 `workflow_dispatch` 手动构建；为保证测试提交自动生成 Artifact，本分支的 push 也触发同一工作流。Artifact 为 `OpenM1-v0.6.20-ap-password-test`；main 和稳定分支仍使用各自原有提交和构建定义。测试 Artifact 包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号和校验报告。该密码版本须在真实 M1 上验证后才能考虑以新的正式版本合入 main。
+本分支可通过 `workflow_dispatch` 手动构建，也由功能分支 push 自动触发。Artifact 为 `OpenM1-v0.6.21-display-power-test`；main 和稳定分支仍使用各自原有提交和构建定义。测试 Artifact 包含 OTA、BIN、ELF、MAP、manifest、SHA256SUMS、符号和校验报告。熄屏指示灯行为须在真实 M1 上验证后再考虑合入 main。

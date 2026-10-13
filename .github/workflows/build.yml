@@ -1,8 +1,8 @@
-name: Build OpenM1 v0.6.20 AP password test
+name: Build OpenM1 v0.6.21 display power test
 on:
   workflow_dispatch:
   push:
-    branches: [main, release/v0.6.20-stable, feature/recovery-ap-default-password]
+    branches: [main, release/v0.6.20-stable, feature/recovery-ap-default-password, feature/v0.6.21-display-power]
 permissions:
   contents: read
 jobs:
@@ -28,6 +28,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OpenM1-v0.6.20-ap-password-test
+          name: OpenM1-v0.6.21-display-power-test
           path: dist/
           if-no-files-found: error
